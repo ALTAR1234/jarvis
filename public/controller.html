@@ -59,6 +59,10 @@
         <div class="tiles" id="brains"></div>
         <p style="color:var(--faint);font-size:12.5px;margin:10px 0 0">Powers Helper, Inboxer, Visioner and the other apps. Claude and ChatGPT need their API keys in the J.A.R.V.I.S. configuration file (J.A.R.V.I.S. menu → Open configuration folder → .env).</p>
       </div>
+      <div class="card"><h3>Voice</h3>
+        <div class="tiles" id="voicemode"><button class="tile" data-live="true"><span>⚡</span>Live<small>talk back and forth, interrupt anytime</small></button><button class="tile" data-live="false"><span>🎙</span>Regular<small>replies after you finish talking</small></button></div>
+        <p style="color:var(--faint);font-size:12.5px;margin:10px 0 0">If Live reaches Google's limit, J.A.R.V.I.S. switches to Regular on its own. Applies the next time you click the mic.</p>
+      </div>
       <div class="card span2"><h3>Locker</h3>
         <div class="opt">PIN <span id="pinstate"></span></div>
         <div class="pinrow"><input class="field" id="oldpin" type="password" inputmode="numeric" placeholder="Current PIN (if you have one)"><input class="field" id="newpin" type="password" inputmode="numeric" placeholder="New PIN, 4–8 digits (blank removes it)"><button class="btn" id="savepin">Save PIN</button></div>

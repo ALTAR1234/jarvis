@@ -298,7 +298,7 @@ const PREF_RULES = {
   sleepMinutes: (v) => Number.isInteger(v) && v >= 1 && v <= 60, voiceName: (v) => VOICES.includes(v), fullscreen: (v) => typeof v === 'boolean', avatarStyle: (v) => ['reactor', 'head'].includes(v), appsInside: (v) => typeof v === 'boolean', launchAppsOnStart: (v) => typeof v === 'boolean', dictation: (v) => typeof v === 'boolean', autoDock: (v) => typeof v === 'boolean', hideTaskbar: (v) => typeof v === 'boolean',
   userName: (v) => typeof v === 'string' && v.length <= 40, homeCity: (v) => typeof v === 'string' && v.length <= 80, newsTopics: (v) => typeof v === 'string' && v.length <= 160,
   briefingOnStart: (v) => typeof v === 'boolean', lastBriefingAt: (v) => Number.isFinite(v) && v >= 0,
-  brain: (v) => ['gemini', 'claude', 'chatgpt', 'big'].includes(v), dnd: (v) => typeof v === 'boolean', lockOnStart: (v) => typeof v === 'boolean', lockIdleMinutes: (v) => Number.isInteger(v) && v >= 0 && v <= 240, backupDaily: (v) => typeof v === 'boolean', lastBackupAt: (v) => Number.isFinite(v) && v >= 0
+  brain: (v) => ['gemini', 'claude', 'chatgpt', 'big'].includes(v), dnd: (v) => typeof v === 'boolean', lockOnStart: (v) => typeof v === 'boolean', lockIdleMinutes: (v) => Number.isInteger(v) && v >= 0 && v <= 240, backupDaily: (v) => typeof v === 'boolean', liveVoice: (v) => typeof v === 'boolean', lastBackupAt: (v) => Number.isFinite(v) && v >= 0
 };
 function readPreferences() {
   let p = {}; try { p = JSON.parse(fs.readFileSync(preferencesFile(), 'utf8')) || {}; } catch {}
@@ -306,7 +306,7 @@ function readPreferences() {
     sleepMinutes: PREF_RULES.sleepMinutes(p.sleepMinutes) ? p.sleepMinutes : 2, fullscreen: p.fullscreen !== false, avatarStyle: p.avatarStyle === 'head' ? 'head' : 'reactor', appsInside: p.appsInside !== false, launchAppsOnStart: p.launchAppsOnStart !== false, dictation: p.dictation !== false, autoDock: p.autoDock !== false, hideTaskbar: p.hideTaskbar !== false,
     userName: typeof p.userName === 'string' ? p.userName.trim() : '', homeCity: typeof p.homeCity === 'string' ? p.homeCity.trim() : '', newsTopics: typeof p.newsTopics === 'string' ? p.newsTopics.trim() : '',
     briefingOnStart: p.briefingOnStart !== false, lastBriefingAt: Number.isFinite(p.lastBriefingAt) ? p.lastBriefingAt : 0,
-    brain: PREF_RULES.brain(p.brain) ? p.brain : 'gemini', dnd: p.dnd === true, lockOnStart: p.lockOnStart === true, lockIdleMinutes: PREF_RULES.lockIdleMinutes(p.lockIdleMinutes) ? p.lockIdleMinutes : 0, backupDaily: p.backupDaily !== false, lastBackupAt: Number.isFinite(p.lastBackupAt) ? p.lastBackupAt : 0, voiceName: PREF_RULES.voiceName(p.voiceName) ? p.voiceName : null, voices: VOICES };
+    brain: PREF_RULES.brain(p.brain) ? p.brain : 'gemini', dnd: p.dnd === true, lockOnStart: p.lockOnStart === true, lockIdleMinutes: PREF_RULES.lockIdleMinutes(p.lockIdleMinutes) ? p.lockIdleMinutes : 0, backupDaily: p.backupDaily !== false, liveVoice: p.liveVoice !== false, lastBackupAt: Number.isFinite(p.lastBackupAt) ? p.lastBackupAt : 0, voiceName: PREF_RULES.voiceName(p.voiceName) ? p.voiceName : null, voices: VOICES };
 }
 function currentVoice() {
   const pref = readPreferences().voiceName; if (pref) return pref;
@@ -643,7 +643,7 @@ function createServer() {
         voiceConfigured: Boolean(provider === 'fish' ? process.env.FISH_API_KEY : process.env.GEMINI_API_KEY),
         voiceProvider: provider === 'fish' ? 'Fish Audio' : 'Gemini',
         wakeWord: (process.env.WAKE_WORD || '').trim().toLowerCase().slice(0, 40),
-        live: Boolean(process.env.GEMINI_API_KEY) && !/^(0|false|off|no)$/i.test(process.env.LIVE_MODE || 'on')
+        live: Boolean(process.env.GEMINI_API_KEY) && !/^(0|false|off|no)$/i.test(process.env.LIVE_MODE || 'on') && readPreferences().liveVoice !== false
       });
       return;
     }

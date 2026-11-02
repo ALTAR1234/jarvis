@@ -358,7 +358,13 @@ const live = (() => {
       s.ready = false; s.ws = null; s.gate = false;
       if (!s.on || s.stopping || s.asleep) return;
       // Fatal setup problems (bad key, quota, unknown model) stop the session instead of retrying.
-      if (failed && /key|quota|LIVE_MODEL|setup is incomplete/i.test(failed) || s.attempts >= 5) {
+      if (failed && /quota/i.test(failed)) {
+        // Live hit its limit: carry on with the regular record-then-reply voice until Live is available again.
+        stop({ save: false }); liveSupported = false;
+        showToast('Gemini Live reached its limit, so I switched to regular voice. Live comes back after Google resets it.');
+        if (voiceConfigured) enableHandsFree(); return;
+      }
+      if (failed && /key|LIVE_MODEL|setup is incomplete/i.test(failed) || s.attempts >= 5) {
         showToast(failed || 'Lost the live connection to Gemini.'); stop(); return;
       }
       s.attempts++; updateState('thinking');
@@ -452,7 +458,8 @@ const live = (() => {
     get on() { return s.on; }, get ready() { return s.ready; }, get asleep() { return s.asleep; } };
 })();
 let alwaysListening = true;
-mic.addEventListener('click', () => {
+mic.addEventListener('click', async () => {
+  if (!live.on && !handsFreeEnabled) liveSupported = await fetch('/api/status').then((r) => r.json()).then((st) => Boolean(st.live)).catch(() => liveSupported);
   if (!liveSupported) { if (handsFreeEnabled) disableHandsFree(); else enableHandsFree(); return; }
   if (!live.on) live.start();
   else if (alwaysListening) { if (live.asleep) live.wake('[The user just woke you up. Reply with a very brief acknowledgement, such as "Back online, sir."]'); else live.sleep(); }
