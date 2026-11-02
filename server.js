@@ -344,7 +344,8 @@ const DOCK = [
   { id: 'listener', label: 'Listener', glyph: '♪', match: ['Listener'], path: 'Programs\\aurora-music\\' },
   { id: 'gamer', label: 'Gamer', glyph: '◈', match: ['Gamer'], path: 'Programs\\nexus-games\\' },
   { id: 'weber', label: 'Weber', glyph: '◎', match: ['Weber'], path: 'Programs\\weber-browser\\' },
-  { id: 'streamer', label: 'Streamer', glyph: '▷', match: ['Streamer'], path: 'Programs\\Streamer\\' }
+  { id: 'streamer', label: 'Streamer', glyph: '▷', match: ['Streamer'], path: 'Programs\\Streamer\\' },
+  { id: 'socialer', label: 'Socialer', glyph: '◉', match: ['Socialer'], path: 'Programs\\socialer\\' }
 ];
 // Every app in the Windows Start menu (refreshed every 10 minutes) for the HUD's own Start menu.
 let startCache = null;
@@ -371,7 +372,7 @@ async function dockApps() {
 }
 // Arjun's own apps open with J.A.R.V.I.S. (one after another, each docked as a tab when apps
 // open inside), then the HUD comes back to the front. Apps already running are just docked.
-const OWN_APPS = ['listener', 'gamer', 'weber', 'streamer'];
+const OWN_APPS = ['listener', 'gamer', 'weber', 'streamer', 'socialer'];
 async function launchOwnApps() {
   const log = (m) => { try { fs.appendFileSync(path.join(path.dirname(preferencesFile()), 'launch-apps.log'), `${new Date().toISOString()} ${m}
 `); } catch {} };
