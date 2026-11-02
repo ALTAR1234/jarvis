@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Planner</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'">
+<link rel="stylesheet" href="panels.css">
+<style>
+  .wrap { max-width: 1200px; }
+  .top { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; }
+  .top h2 { margin: 0 12px 0 0; font-size: 22px; min-width: 200px; }
+  .add { display: flex; gap: 8px; margin-bottom: 14px; } .add .field { flex: 1; }
+  .layout { display: grid; grid-template-columns: 1fr 320px; gap: 16px; }
+  .cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+  .dow { text-align: center; color: var(--faint); font-size: 12px; font-weight: 700; padding: 4px; }
+  .day { min-height: 92px; padding: 6px; border-radius: 12px; background: var(--card); box-shadow: inset 0 0 0 1px var(--edge); text-align: left; display: flex; flex-direction: column; gap: 3px; overflow: hidden; }
+  .day.out { opacity: .35; } .day.today { box-shadow: inset 0 0 0 1.5px var(--cyan); } .day.sel { background: rgb(56 207 255 / .14); }
+  .day .n { font-weight: 750; font-size: 13px; }
+  .chip { font-size: 11.5px; padding: 1px 6px; border-radius: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: rgb(56 207 255 / .18); color: #bff3ff; }
+  .chip.hw { background: rgb(255 122 168 / .2); color: #ffc4d8; } .chip.step { background: rgb(255 197 107 / .18); color: #ffe2b0; }
+  .side .card { padding: 14px; }
+  .side h3 { margin: 0 0 10px; font-size: 15px; }
+  .item { display: flex; gap: 10px; align-items: start; padding: 8px 0; border-bottom: 1px solid var(--edge); }
+  .item .t { color: var(--cyan); font-weight: 700; min-width: 64px; font-size: 13px; }
+  .item div { flex: 1; } .item small { display: block; color: var(--faint); }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="head"><span class="core"></span><div><h1>Planner</h1><p>Your calendar, homework and reminders together</p></div></header>
+    <form class="add" id="add"><input class="field" id="text" placeholder="Add anything: “soccer practice Thursday at 5pm”, “dentist Nov 14 10:30”"><button class="btn primary">Add</button></form>
+    <div class="top"><h2 id="month"></h2><button class="btn small" id="prev">‹</button><button class="btn small" id="today">Today</button><button class="btn small" id="next">›</button></div>
+    <div class="layout">
+      <div><div class="cal" id="cal"></div></div>
+      <aside class="side"><div class="card" id="dayview"></div></aside>
+    </div>
+  </div>
+  <script src="kit.js"></script>
+  <script src="planner.js"></script>
+</body>
+</html>

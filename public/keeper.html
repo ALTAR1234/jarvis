@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Keeper</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'">
+<link rel="stylesheet" href="panels.css">
+<style>
+  .hero { padding: 20px; display: flex; align-items: center; gap: 16px; margin-bottom: 16px; }
+  .hero b { display: block; font-size: 17px; } .hero small { color: var(--dim); }
+  .hero .grow { flex: 1; }
+  .b { display: flex; align-items: center; gap: 12px; padding: 12px 16px; margin-bottom: 8px; }
+  .b div { flex: 1; } .b small { display: block; color: var(--faint); }
+  .opt { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; margin-bottom: 16px; color: var(--dim); }
+  .what { color: var(--faint); font-size: 13px; line-height: 1.6; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="head"><span class="core"></span><div><h1>Keeper</h1><p>Backups of everything you've built</p></div></header>
+    <div class="card hero"><div class="grow"><b id="last">…</b><small>Backups go to Documents\Jarvis Backups. The newest 10 are kept.</small></div><button class="btn" id="folder">Open folder</button><button class="btn primary" id="now">Back up now</button></div>
+    <div class="card opt">Back up automatically every day <button class="btn small" id="daily">…</button></div>
+    <div id="list"></div>
+    <p class="what"><b>What's included:</b> J.A.R.V.I.S.'s memory, reminders, notes, plans, homework and settings; the settings of Weber, Listener, Gamer, Streamer and Socialer; Petter's progress; and your Beater beats. <b>Never included:</b> API keys (your .env file) and website sign-ins.</p>
+  </div>
+  <script src="kit.js"></script>
+  <script src="keeper.js"></script>
+</body>
+</html>

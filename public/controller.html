@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Controller</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'">
+<link rel="stylesheet" href="panels.css">
+<style>
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .card { padding: 16px; }
+  .card h3 { margin: 0 0 12px; font-size: 12.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+  .slider { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .slider input { flex: 1; accent-color: var(--cyan); height: 6px; }
+  .slider b { width: 44px; text-align: right; }
+  .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .tile { padding: 12px 8px; border-radius: 14px; background: var(--card); box-shadow: inset 0 0 0 1px var(--edge); font-weight: 650; text-align: center; }
+  .tile span { display: block; font-size: 20px; margin-bottom: 4px; }
+  .tile.on { background: rgb(56 207 255 / .22); box-shadow: inset 0 0 0 1.5px var(--cyan); }
+  .tile:disabled { opacity: .4; cursor: not-allowed; }
+  .tile small { display: block; color: var(--faint); font-size: 11.5px; font-weight: 500; }
+  .media { display: flex; gap: 8px; justify-content: center; }
+  .media button { width: 52px; height: 52px; border-radius: 50%; background: var(--card-2); box-shadow: inset 0 0 0 1px var(--edge); font-size: 18px; }
+  .stat { display: flex; justify-content: space-between; padding: 6px 0; color: var(--dim); } .stat b { color: var(--text); }
+  .pinrow { display: flex; gap: 8px; margin: 8px 0; } .pinrow input { flex: 1; }
+  .opt { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 0; color: var(--dim); }
+  .span2 { grid-column: 1 / -1; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="head"><span class="core"></span><div><h1>Controller</h1><p>Your PC and J.A.R.V.I.S. at a glance</p></div></header>
+    <div class="grid">
+      <div class="card"><h3>Sound and display</h3>
+        <div class="slider">🔊<input type="range" id="vol" min="0" max="100"><b id="volv">–</b></div>
+        <div class="slider">☀<input type="range" id="bri" min="0" max="100"><b id="briv">–</b></div>
+        <div class="media"><button data-m="previous" title="Previous">⏮</button><button data-m="playpause" title="Play or pause">⏯</button><button data-m="next" title="Next">⏭</button><button id="mute" title="Mute">🔇</button></div>
+      </div>
+      <div class="card"><h3>Quick settings</h3>
+        <div class="tiles">
+          <button class="tile" id="dnd"><span>🌙</span>Do Not Disturb</button>
+          <button class="tile" data-set="network-wifi"><span>📶</span>Wi-Fi</button>
+          <button class="tile" data-set="bluetooth"><span>ᛒ</span>Bluetooth</button>
+          <button class="tile" data-set="display"><span>🖥</span>Display</button>
+          <button class="tile" data-set="batterysaver"><span>🔋</span>Battery</button>
+          <button class="tile" id="lock"><span>🔒</span>Lock now</button>
+        </div>
+        <div id="stats" style="margin-top:12px"></div>
+      </div>
+      <div class="card"><h3>Focus modes</h3>
+        <div class="tiles">
+          <button class="tile" data-focus="homework"><span>✎</span>Homework<small>quiet, opens Helper</small></button>
+          <button class="tile" data-focus="game"><span>🎮</span>Game<small>quiet, opens Gamer</small></button>
+          <button class="tile" data-focus="chill"><span>♪</span>Chill<small>music and Dreamer</small></button>
+          <button class="tile" data-focus="sleep"><span>💤</span>Sleep<small>pause music, lock</small></button>
+          <button class="tile" data-focus="normal"><span>☼</span>Normal<small>everything back on</small></button>
+        </div>
+      </div>
+      <div class="card"><h3>Brain</h3>
+        <div class="tiles" id="brains"></div>
+        <p style="color:var(--faint);font-size:12.5px;margin:10px 0 0">Powers Helper, Inboxer, Visioner and the other apps. Claude and ChatGPT need their API keys in the J.A.R.V.I.S. configuration file (J.A.R.V.I.S. menu → Open configuration folder → .env).</p>
+      </div>
+      <div class="card span2"><h3>Locker</h3>
+        <div class="opt">PIN <span id="pinstate"></span></div>
+        <div class="pinrow"><input class="field" id="oldpin" type="password" inputmode="numeric" placeholder="Current PIN (if you have one)"><input class="field" id="newpin" type="password" inputmode="numeric" placeholder="New PIN, 4–8 digits (blank removes it)"><button class="btn" id="savepin">Save PIN</button></div>
+        <div class="opt">Lock when J.A.R.V.I.S. starts <button class="tile" id="lockstart" style="padding:6px 14px">Off</button></div>
+        <div class="opt">Lock after I'm away <select class="field" id="idle" style="width:auto"><option value="0">Never</option><option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option></select></div>
+        <p style="color:var(--faint);font-size:12.5px;margin:8px 0 0">Locker covers the screen with your welcome screen until the PIN is entered. It is a J.A.R.V.I.S. lock, not your Windows sign-in, so keep a Windows password too.</p>
+      </div>
+    </div>
+  </div>
+  <script src="kit.js"></script>
+  <script src="controller.js"></script>
+</body>
+</html>

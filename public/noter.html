@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Noter</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'">
+<link rel="stylesheet" href="panels.css">
+<style>
+  .layout { display: grid; grid-template-columns: 300px 1fr; gap: 16px; }
+  .list .n { display: block; width: 100%; text-align: left; padding: 12px 14px; margin-bottom: 8px; }
+  .list .n.on { box-shadow: inset 0 0 0 1.5px var(--cyan); }
+  .list .n b { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .list .n small { color: var(--faint); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .editor { padding: 18px; display: flex; flex-direction: column; gap: 10px; min-height: 520px; }
+  #title { font-size: 20px; font-weight: 750; background: none; box-shadow: none; padding: 4px 0; }
+  #body { flex: 1; min-height: 220px; background: rgb(0 0 0 / .2); }
+  .todo { display: flex; align-items: center; gap: 10px; padding: 6px 4px; }
+  .todo input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--cyan); }
+  .todo input[type=text] { flex: 1; background: none; border: 0; outline: none; padding: 4px 0; }
+  .todo.done input[type=text] { color: var(--faint); text-decoration: line-through; }
+  .todo button { color: var(--faint); }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row .grow { flex: 1; }
+  .saved { color: var(--faint); font-size: 12px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="head"><span class="core"></span><div><h1>Noter</h1><p>Notes and to-do lists. Say “add milk to my groceries” any time.</p></div><span class="grow"></span><button class="btn primary" id="new">New note</button></header>
+    <div class="layout">
+      <aside class="list" id="list"></aside>
+      <section class="card editor" id="editor">
+        <div class="row"><input class="field grow" id="title" placeholder="Title"><button class="btn small" id="pin">☆ Pin</button><button class="btn small danger" id="del">Delete</button></div>
+        <textarea class="field" id="body" placeholder="Write anything…"></textarea>
+        <div id="todos"></div>
+        <div class="row"><input class="field grow" id="newtodo" placeholder="Add a to-do and press Enter"><span class="saved" id="saved"></span></div>
+      </section>
+    </div>
+  </div>
+  <script src="kit.js"></script>
+  <script src="noter.js"></script>
+</body>
+</html>

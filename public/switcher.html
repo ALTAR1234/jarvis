@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Switcher</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'">
+<link rel="stylesheet" href="panels.css">
+<style>
+  html, body { height: 100%; overflow: hidden; }
+  body { background: rgb(2 8 18 / .96); }
+  .wrap { max-width: 1400px; padding-top: 5vh; }
+  #q { font-size: 18px; padding: 14px 18px; margin-bottom: 20px; }
+  .apps { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
+  .apps button { height: 36px; padding: 0 14px; border-radius: 10px; background: var(--card-2); box-shadow: inset 0 0 0 1px var(--edge); font-weight: 650; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; max-height: 70vh; overflow-y: auto; padding: 4px; }
+  .win { position: relative; text-align: left; padding: 10px; border-radius: 16px; background: var(--card); box-shadow: inset 0 0 0 1px var(--edge); transition: transform .15s; }
+  .win:hover, .win.sel { transform: translateY(-3px); box-shadow: inset 0 0 0 2px var(--cyan), 0 10px 30px rgb(0 0 0 / .4); }
+  .win .thumb { width: 100%; aspect-ratio: 16 / 10; border-radius: 10px; background: #000 center / contain no-repeat; margin-bottom: 8px; }
+  .win .name { display: flex; align-items: center; gap: 8px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .win img { width: 20px; height: 20px; }
+  .win .x { position: absolute; right: 14px; top: 14px; width: 28px; height: 28px; border-radius: 50%; background: rgb(0 0 0 / .7); opacity: 0; }
+  .win:hover .x { opacity: 1; }
+  .hint { color: var(--faint); margin-top: 14px; font-size: 13px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <input class="field" id="q" placeholder="Type to find a window or app · Enter to switch · Esc to close" autocomplete="off">
+    <div class="apps" id="apps"></div>
+    <div class="grid" id="grid"><div class="empty">Looking at your windows…</div></div>
+    <div class="hint">Ctrl+Alt+W opens and closes Switcher. Click × to close a window.</div>
+  </div>
+  <script src="kit.js"></script>
+  <script src="switcher.js"></script>
+</body>
+</html>

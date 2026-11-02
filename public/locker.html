@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Locker</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'">
+<link rel="stylesheet" href="panels.css">
+<style>
+  html, body { height: 100%; overflow: hidden; user-select: none; }
+  body { background: radial-gradient(80% 70% at 20% 10%, #0d3b66 0%, transparent 60%), radial-gradient(60% 60% at 90% 90%, #3a1d6e 0%, transparent 60%), #020812; }
+  .lock { height: 100%; display: grid; grid-template-columns: 1.2fr 1fr; align-items: center; gap: 40px; padding: 6vh 7vw; }
+  .time { font-size: clamp(80px, 12vw, 170px); font-weight: 750; letter-spacing: -.04em; line-height: .95; }
+  .date { font-size: 24px; color: var(--dim); margin-top: 8px; }
+  .hi { margin-top: 36px; font-size: 28px; font-weight: 700; }
+  .brief { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 18px; max-width: 640px; }
+  .brief .card { padding: 14px 16px; }
+  .brief b { display: block; font-size: 15px; } .brief small { color: var(--dim); }
+  .pad { justify-self: center; display: flex; flex-direction: column; align-items: center; gap: 18px; }
+  .orb { width: 110px; height: 110px; border-radius: 50%; background: radial-gradient(circle, #bff3ff 0 10%, #38cfff 28%, #0a4f86 62%, transparent 72%); box-shadow: 0 0 60px rgb(56 207 255 / .5); animation: breathe 4s ease-in-out infinite; }
+  @keyframes breathe { 50% { transform: scale(1.06); box-shadow: 0 0 90px rgb(56 207 255 / .7); } }
+  .dots { display: flex; gap: 14px; height: 16px; } .dots i { width: 14px; height: 14px; border-radius: 50%; box-shadow: inset 0 0 0 2px var(--cyan); } .dots i.on { background: var(--cyan); }
+  .keys { display: grid; grid-template-columns: repeat(3, 72px); gap: 12px; }
+  .keys button { height: 72px; border-radius: 50%; background: var(--card-2); box-shadow: inset 0 0 0 1px var(--edge); font-size: 24px; font-weight: 650; }
+  .keys button:hover { background: rgb(56 207 255 / .2); }
+  .err { color: var(--pink); min-height: 20px; font-weight: 650; }
+  .shake { animation: shake .35s; } @keyframes shake { 25% { transform: translateX(-10px); } 75% { transform: translateX(10px); } }
+  .enter { height: 52px; padding: 0 30px; border-radius: 26px; background: var(--cyan); color: #021220; font-size: 16px; font-weight: 800; }
+  .note { position: fixed; left: 7vw; bottom: 3vh; color: var(--faint); font-size: 12.5px; }
+</style>
+</head>
+<body>
+  <div class="lock">
+    <section>
+      <div class="time" id="time"></div>
+      <div class="date" id="date"></div>
+      <div class="hi" id="hi"></div>
+      <div class="brief" id="brief"></div>
+    </section>
+    <section class="pad">
+      <div class="orb"></div>
+      <div id="pinbox" hidden>
+        <div class="dots" id="dots"></div>
+      </div>
+      <div class="keys" id="keys" hidden></div>
+      <div class="err" id="err"></div>
+      <button class="enter" id="enter" hidden>Enter J.A.R.V.I.S.</button>
+    </section>
+  </div>
+  <div class="note">J.A.R.V.I.S. Locker · set or change your PIN in Controller</div>
+  <script src="kit.js"></script>
+  <script src="locker.js"></script>
+</body>
+</html>

@@ -11,11 +11,14 @@ if (!app.isPackaged) app.setPath('userData', path.join(__dirname, '.appdata'));
 function isAppOrigin(value) {
   try { return new URL(value).origin === appOrigin; } catch { return false; }
 }
+// Only J.A.R.V.I.S.'s own pages get the microphone; only Snapper's recorder page gets the screen.
+const isRecorder = (url) => isAppOrigin(url) && new URL(url).pathname === '/rec.html';
 function configureMediaPermissions() {
-  session.defaultSession.setPermissionCheckHandler((_contents, permission, origin, details) => permission === 'media' && isAppOrigin(origin) && details.mediaType === 'audio');
+  session.defaultSession.setPermissionCheckHandler((contents, permission, origin, details) => permission === 'media' && isAppOrigin(origin) && (details.mediaType === 'audio' || (details.mediaType === 'video' && isRecorder(contents?.getURL() || ''))));
   session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
     const audioOnly = permission === 'media' && isAppOrigin(contents.getURL()) && details.mediaTypes?.includes('audio') && !details.mediaTypes?.includes('video');
-    callback(Boolean(audioOnly));
+    const screen = permission === 'media' && isRecorder(contents.getURL());
+    callback(Boolean(audioOnly || screen));
   });
 }
 // The built-in browser panel: its own persistent session (sign-ins stick between launches), no device
@@ -92,6 +95,8 @@ async function createWindow() {
   if (prefs.dictation !== false) setupDictation();
   // Ctrl+Alt+J from anywhere: Vision. Freeze the screen, box anything, ask about it.
   if (prefs.vision !== false) setupVision();
+  // Locker (Ctrl+Alt+L), Snapper (Ctrl+Alt+S, recording Ctrl+Alt+R) and Switcher (Ctrl+Alt+W)
+  setupOsWindows(prefs);
   // Ctrl+Shift+J from anywhere: wake J.A.R.V.I.S. (or start a live conversation).
   globalShortcut.register('CommandOrControl+Shift+J', () => {
     if (!mainWindow) return;
@@ -151,9 +156,106 @@ function setupVision() {
 }
 // Inboxer and Helper: J.A.R.V.I.S.'s own app windows, served by its server and kept above the HUD.
 const panels = {};
-const PANELS = { inboxer: { title: 'Inboxer', width: 1100, height: 820 }, helper: { title: 'Helper', width: 1180, height: 840 }, dreamer: { title: 'Dreamer', width: 1400, height: 900, maximize: true } };
+const PANELS = { inboxer: { title: 'Inboxer', width: 1100, height: 820 }, helper: { title: 'Helper', width: 1180, height: 840 }, dreamer: { title: 'Dreamer', width: 1400, height: 900, maximize: true },
+  notifier: { title: 'Notifier', width: 560, height: 760 }, controller: { title: 'Controller', width: 900, height: 760 }, filer: { title: 'Filer', width: 1200, height: 820 },
+  planner: { title: 'Planner', width: 1200, height: 860 }, noter: { title: 'Noter', width: 1100, height: 800 }, watcher: { title: 'Watcher', width: 1000, height: 780 },
+  keeper: { title: 'Keeper', width: 820, height: 720 }, shopper: { title: 'Shopper', width: 980, height: 760 }, updater: { title: 'Updater', width: 900, height: 720 } };
 globalThis.jarvisFocusHud = () => { if (!mainWindow) return; if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); };
+// ---------- Locker, Snapper, the screen recorder and Switcher: full-screen J.A.R.V.I.S. windows ----------
+const overlays = {};
+function overlay(name, { bounds, focusable = true, url, onTitle } = {}) {
+  let win = overlays[name];
+  if (!win || win.isDestroyed()) {
+    win = overlays[name] = new BrowserWindow({ frame: false, resizable: false, movable: false, skipTaskbar: true, show: false, backgroundColor: '#000000', alwaysOnTop: true, fullscreenable: false, focusable,
+      webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } });
+    win.setAlwaysOnTop(true, 'screen-saver');
+    win.webContents.on('will-navigate', (e, u) => { if (!isAppOrigin(u)) e.preventDefault(); });
+    win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    if (onTitle) win.on('page-title-updated', (_e, t) => onTitle(t, win));
+    win.on('closed', () => { delete overlays[name]; });
+  }
+  if (bounds) win.setBounds(bounds);
+  return win.loadURL(`${appOrigin}/${url || name + '.html'}${url?.includes('?') ? '&' : '?'}t=${Date.now()}`).then(() => { win.show(); if (focusable) win.focus(); return win; });
+}
+function setupOsWindows(prefs) {
+  const { screen, desktopCapturer, powerMonitor } = require('electron');
+  const here = () => screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  // Locker: covers every screen; unlocking goes through the server, which checks the PIN
+  let locked = false;
+  globalThis.jarvisLock = async () => {
+    if (locked) return;
+    locked = true;
+    const primary = screen.getPrimaryDisplay();
+    await overlay('locker', { bounds: primary.bounds });
+    overlays.locker?.setKiosk?.(true);
+  };
+  globalThis.jarvisUnlock = () => { locked = false; const w = overlays.locker; if (w && !w.isDestroyed()) { w.setKiosk?.(false); w.close(); } };
+  globalShortcut.register('CommandOrControl+Alt+L', () => globalThis.jarvisLock());
+  setInterval(() => {
+    let p = {};
+    try { p = JSON.parse(fs.readFileSync(process.env.ASSISTANT_PREFERENCES_PATH, 'utf8')) || {}; } catch {}
+    if (p.lockIdleMinutes > 0 && !locked && powerMonitor.getSystemIdleTime() >= p.lockIdleMinutes * 60) globalThis.jarvisLock();
+  }, 20000);
+  if (prefs.lockOnStart) setTimeout(() => globalThis.jarvisLock(), 1500);
+
+  // Snapper: freeze the screen into an editor (crop, draw, highlight, blur, then copy or save)
+  globalThis.jarvisSnap = { shot: null };
+  globalThis.jarvisSnapClose = () => { const w = overlays.snapper; if (w && !w.isDestroyed()) w.hide(); globalThis.jarvisSnap.shot = null; };
+  globalShortcut.register('CommandOrControl+Alt+S', async () => {
+    if (overlays.snapper?.isVisible()) return globalThis.jarvisSnapClose();
+    const d = here();
+    const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: Math.round(d.size.width * d.scaleFactor), height: Math.round(d.size.height * d.scaleFactor) } }).catch(() => []);
+    const src = sources.find((s) => String(s.display_id) === String(d.id)) || sources[0];
+    if (!src) return;
+    globalThis.jarvisSnap.shot = src.thumbnail.toPNG();
+    await overlay('snapper', { bounds: d.bounds });
+  });
+  // the recorder: a small pill that records the screen the mouse is on until you stop it
+  globalShortcut.register('CommandOrControl+Alt+R', async () => {
+    if (overlays.rec && !overlays.rec.isDestroyed()) return overlays.rec.webContents.executeJavaScript('window.stopRecording && window.stopRecording()').catch(() => {});
+    const d = here();
+    const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 } }).catch(() => []);
+    const src = sources.find((s) => String(s.display_id) === String(d.id)) || sources[0];
+    if (!src) return;
+    const w = 210, h = 54;
+    await overlay('rec', { bounds: { x: d.workArea.x + d.workArea.width - w - 24, y: d.workArea.y + 24, width: w, height: h }, focusable: false, url: `rec.html?source=${encodeURIComponent(src.id)}`, onTitle: (t, win) => { if (t === 'done') win.close(); } });
+    overlays.rec.setContentProtection(true); // the pill itself stays out of the recording
+  });
+  // Switcher: every open window with a live preview; click or type to switch
+  globalShortcut.register('CommandOrControl+Alt+W', async () => {
+    if (overlays.switcher?.isVisible()) return overlays.switcher.hide();
+    await overlay('switcher', { bounds: here().bounds, onTitle: (t, win) => { if (t === 'close') win.hide(); } });
+  });
+}
+// Claude and ChatGPT as apps: their own websites in their own signed-in sessions, kept between launches
+const WEB_APPS = {
+  claude: { title: 'Claude', url: 'https://claude.ai/new', hosts: ['claude.ai', 'anthropic.com'] },
+  chatgpt: { title: 'ChatGPT', url: 'https://chatgpt.com/', hosts: ['chatgpt.com', 'openai.com', 'oaistatic.com', 'oaiusercontent.com'] },
+};
+const SIGN_IN_HOSTS = ['accounts.google.com', 'appleid.apple.com', 'login.microsoftonline.com', 'login.live.com', 'auth.openai.com'];
+function openWebApp(name) {
+  const spec = WEB_APPS[name];
+  const open = panels[name];
+  if (open && !open.isDestroyed()) { if (open.isMinimized()) open.restore(); open.show(); open.focus(); return; }
+  const partition = `persist:app-${name}`;
+  const ses = session.fromPartition(partition);
+  ses.setUserAgent(`Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome} Safari/537.36`);
+  ses.setPermissionRequestHandler((_c, permission, done) => done(['clipboard-sanitized-write', 'notifications', 'fullscreen', 'media'].includes(permission)));
+  const belongs = (url, hosts) => { try { const h = new URL(url).hostname; return hosts.some((x) => h === x || h.endsWith('.' + x)); } catch { return false; } };
+  const win = new BrowserWindow({ width: 1200, height: 860, title: spec.title, parent: mainWindow || undefined, autoHideMenuBar: true, backgroundColor: '#ffffff', webPreferences: { partition, contextIsolation: true, nodeIntegration: false, sandbox: true } });
+  win.setMenuBarVisibility(false);
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (belongs(url, [...spec.hosts, ...SIGN_IN_HOSTS])) return { action: 'allow', overrideBrowserWindowOptions: { width: 520, height: 720, autoHideMenuBar: true, parent: win, webPreferences: { partition, sandbox: true, contextIsolation: true } } };
+    if (/^https?:/.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  win.webContents.on('will-navigate', (e, url) => { if (!belongs(url, [...spec.hosts, ...SIGN_IN_HOSTS])) { e.preventDefault(); if (/^https?:/.test(url)) shell.openExternal(url); } });
+  win.on('closed', () => { delete panels[name]; });
+  panels[name] = win;
+  win.loadURL(spec.url);
+}
 globalThis.jarvisOpenPanel = async (name) => {
+  if (WEB_APPS[name]) return openWebApp(name);
   const spec = PANELS[name];
   if (!spec || !appOrigin) return;
   const open = panels[name];

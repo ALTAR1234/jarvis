@@ -41,6 +41,7 @@
     }
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.4.0",
     "ws": "^8.22.0"
   }
 }

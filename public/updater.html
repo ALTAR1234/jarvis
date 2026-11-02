@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Updater</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'">
+<link rel="stylesheet" href="panels.css">
+<style>
+  .a { display: flex; align-items: center; gap: 14px; padding: 14px 16px; margin-bottom: 8px; }
+  .a .ic { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; background: var(--card-2); font-weight: 800; }
+  .a div { flex: 1; min-width: 0; } .a small { display: block; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tag { padding: 2px 9px; border-radius: 8px; font-size: 12px; font-weight: 700; background: rgb(94 230 165 / .15); color: var(--ok); }
+  .tag.new { background: rgb(255 197 107 / .18); color: var(--warn); }
+  .tag.err { background: rgb(255 122 168 / .15); color: var(--pink); }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="head"><span class="core"></span><div><h1>Updater</h1><p>Keeps every app current with its GitHub repo</p></div><span class="grow"></span><button class="btn" id="check">↻ Check now</button></header>
+    <div id="list"><div class="empty">Checking each app…</div></div>
+    <p style="color:var(--faint);font-size:13px">Updating pulls the newest code, then rebuilds and reinstalls the app in its own window. Updating J.A.R.V.I.S. restarts it.</p>
+  </div>
+  <script src="kit.js"></script>
+  <script src="updater.js"></script>
+</body>
+</html>

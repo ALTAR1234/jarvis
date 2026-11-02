@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Watcher</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'">
+<link rel="stylesheet" href="panels.css">
+<style>
+  .gauges { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+  .g { padding: 16px; text-align: center; }
+  .g svg { width: 120px; height: 120px; display: block; margin: 0 auto 6px; }
+  .g b { display: block; font-size: 15px; } .g small { color: var(--dim); }
+  .two { display: grid; grid-template-columns: 1.3fr 1fr; gap: 14px; }
+  .card { padding: 16px; } .card h3 { margin: 0 0 10px; font-size: 12.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; } td { padding: 6px 4px; border-bottom: 1px solid var(--edge); } td:last-child { text-align: right; color: var(--dim); }
+  .bar { height: 4px; border-radius: 3px; background: linear-gradient(90deg, var(--cyan), var(--pink)); margin-top: 3px; }
+  canvas { width: 100%; height: 120px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="head"><span class="core"></span><div><h1>Watcher</h1><p id="sub">Your PC, live</p></div></header>
+    <div class="gauges" id="gauges"></div>
+    <div class="two">
+      <div class="card"><h3>Using the most memory</h3><table id="procs"></table></div>
+      <div class="card"><h3>CPU, last 2 minutes</h3><canvas id="hist" width="420" height="120"></canvas>
+        <h3 style="margin-top:16px">Why is my PC slow?</h3><button class="btn primary" id="why">Ask J.A.R.V.I.S.</button><div class="md" id="answer" style="margin-top:10px"></div></div>
+    </div>
+  </div>
+  <script src="kit.js"></script>
+  <script src="watcher.js"></script>
+</body>
+</html>

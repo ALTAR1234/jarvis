@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Notifier</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'">
+<link rel="stylesheet" href="panels.css">
+<style>
+  .row { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; }
+  .n { display: grid; grid-template-columns: auto 1fr auto; gap: 2px 12px; padding: 12px 14px; margin-bottom: 8px; }
+  .n .ic { grid-row: span 2; width: 36px; height: 36px; border-radius: 11px; display: grid; place-items: center; font-weight: 800; background: var(--card-2); }
+  .n b { font-size: 14px; } .n small { color: var(--faint); white-space: nowrap; } .n p { margin: 0; color: var(--dim); font-size: 13.5px; grid-column: 2 / 4; }
+  .n.unread { box-shadow: inset 3px 0 0 var(--cyan), inset 0 0 0 1px var(--edge); }
+  .dnd { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--dim); font-weight: 650; }
+  .sw { width: 42px; height: 24px; border-radius: 12px; background: rgb(255 255 255 / .15); position: relative; }
+  .sw::after { content: ''; position: absolute; left: 3px; top: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform .15s; }
+  .sw.on { background: var(--cyan); } .sw.on::after { transform: translateX(18px); }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="head"><span class="core"></span><div><h1>Notifier</h1><p id="sub">Alerts from every app</p></div></header>
+    <div class="row"><button class="btn small" id="readall">Mark all read</button><button class="btn small" id="clear">Clear all</button><label class="dnd">Do Not Disturb <button class="sw" id="dnd" title="Silence pop-ups"></button></label></div>
+    <div id="list"></div>
+  </div>
+  <script src="kit.js"></script>
+  <script src="notifier.js"></script>
+</body>
+</html>

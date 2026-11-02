@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Shopper</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'">
+<link rel="stylesheet" href="panels.css">
+<style>
+  h2 { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); margin: 20px 0 10px; }
+  .p { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 14px; align-items: center; padding: 14px 16px; margin-bottom: 8px; }
+  .p .ic { grid-row: span 2; width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; background: var(--card-2); font-size: 20px; }
+  .p small { color: var(--dim); } .p .acts { grid-row: span 2; display: flex; gap: 6px; }
+  .p.off { opacity: .55; }
+  .tools { grid-column: 2 / 4; display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+  .tools span { padding: 2px 8px; border-radius: 7px; background: rgb(56 207 255 / .1); color: #9fe6ff; font-size: 12px; font-weight: 650; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="head"><span class="core"></span><div><h1>Shopper</h1><p>Plugins that teach J.A.R.V.I.S. new skills</p></div></header>
+    <h2>Installed</h2>
+    <div id="installed"></div>
+    <h2>Get more · from your jarvis-plugins repo on GitHub</h2>
+    <div id="catalog"><div class="empty">Checking the catalog…</div></div>
+  </div>
+  <script src="kit.js"></script>
+  <script src="shopper.js"></script>
+</body>
+</html>
