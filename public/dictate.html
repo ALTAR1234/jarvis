@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>idle</title>
+<style>
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; font: 600 14px/1 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif; user-select: none; }
+  .pill { position: absolute; inset: 6px; display: flex; align-items: center; gap: 12px; padding: 0 18px 0 14px; border-radius: 999px;
+    background: rgb(2 16 30 / .94); border: 1px solid rgb(56 207 255 / .45); box-shadow: 0 10px 30px rgb(0 0 0 / .5), 0 0 24px rgb(0 140 255 / .25); color: #cdefff; }
+  .dot { flex: none; width: 26px; height: 26px; border-radius: 50%; background: radial-gradient(circle, #bff3ff 0 12%, #38cfff 30%, #0a4f86 70%); box-shadow: 0 0 14px #38cfff; }
+  .listening .dot { animation: pulse .8s ease-in-out infinite alternate; }
+  .working .dot { animation: spin 1s linear infinite; background: conic-gradient(#38cfff, transparent 70%); }
+  .error .dot { background: #ff6b8a; box-shadow: 0 0 14px #ff6b8a; }
+  @keyframes pulse { to { transform: scale(1.18); box-shadow: 0 0 22px #4fd8ff; } }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .msg { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: .02em; }
+  .bars { display: flex; gap: 3px; align-items: center; height: 22px; }
+  .bars i { width: 3px; height: 4px; border-radius: 2px; background: #38cfff; transition: height .08s; }
+  .key { flex: none; font-size: 10.5px; color: rgb(205 239 255 / .55); letter-spacing: .08em; }
+</style>
+</head>
+<body>
+  <div class="pill" id="pill"><span class="dot"></span><span class="msg" id="msg">Listening…</span><span class="bars" id="bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="key" id="key">CTRL+SHIFT+SPACE TO STOP</span></div>
+  <script src="dictate.js"></script>
+</body>
+</html>

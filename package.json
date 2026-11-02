@@ -1,0 +1,46 @@
+{
+  "name": "jarvis-assistant-starter",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A modular Jarvis-inspired desktop assistant",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "node server.js",
+    "app": "electron .",
+    "dist": "electron-builder --win nsis"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "electron": "^39.0.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.jarvis.assistant",
+    "productName": "J.A.R.V.I.S. Assistant",
+    "files": [
+      "main.cjs",
+      "server.js",
+      "live.js",
+      "core/**/*",
+      "plugins-examples/**/*",
+      "package.json",
+      ".env.example",
+      "public/**/*"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "dependencies": {
+    "ws": "^8.22.0"
+  }
+}

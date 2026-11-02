@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#030913"><title>J.A.R.V.I.S. — Assistant</title><link rel="stylesheet" href="/styles.css">
+</head>
+<body class="avatar-reactor">
+<div class="app-shell">
+  <header class="topbar panel-cut">
+    <div class="brand"><span class="brand-orbit" aria-hidden="true"></span><div class="brand-name">J.A.R.V.I.S.</div><span class="brand-expansion">Just A Rather Very Intelligent System</span></div>
+    <nav class="dock" id="dock" aria-label="Apps"><button type="button" class="dock-start" id="dockStart" title="Start menu" aria-label="Open Start menu"><i></i><i></i><i></i><i></i></button></nav>
+    <div class="top-right"><time id="clock">--:--</time><button class="listen-status" id="voiceToggle" title="Enable spoken replies"><span class="mic-icon">♩</span><span id="voiceLabel">Voice replies off</span><span class="equalizer" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></button>
+      <div class="win-controls" id="winControls" hidden><button type="button" data-win="minimize" title="Minimize" aria-label="Minimize">—</button><button type="button" data-win="fullscreen" title="Toggle full screen (F11)" aria-label="Toggle full screen">⤢</button><button type="button" data-win="quit" class="power" title="Quit J.A.R.V.I.S. (Ctrl+Q)" aria-label="Quit">⏻</button></div></div>
+  </header>
+  <aside class="sidebar panel-cut" aria-label="Assistant sections">
+    <nav>
+      <a class="nav-item active" href="#home"><span>⌂</span>Home</a>
+      <a class="nav-item" href="#voice"><span>♩</span>Voice Assistant</a>
+      <a class="nav-item" href="#system"><span>⚙</span>System Control <small>Online</small></a>
+      <a class="nav-item" href="#files"><span>▱</span>Files &amp; Docs <small>Online</small></a>
+      <a class="nav-item" href="#calendar"><span>▦</span>Calendar <small>Unavailable</small></a>
+      <a class="nav-item" href="#weather"><span>☼</span>Weather <small>Via Gemini</small></a>
+      <a class="nav-item" href="#search"><span>⌕</span>Web Search <small>Via Gemini</small></a>
+      <a class="nav-item" href="#settings"><span>☷</span>Settings</a>
+    </nav>
+    <div class="voice-card panel-cut"><div class="voice-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div><b id="voiceCardTitle">Voice inactive</b><small id="voiceCardText">Tap mic to start hands-free</small></div></div>
+  </aside>
+  <main id="home" class="main-area">
+    <div class="greeting"><div class="greeting-text"><h1>Good <span id="daypart">day</span>, <span class="user-name" id="userName">there</span>.</h1><p id="weatherLine">I’m J.A.R.V.I.S. — your personal AI assistant. How can I help you today?</p>
+      <div class="ticker" id="newsTicker" hidden><button type="button" class="ticker-label" id="briefMe" title="Read me the briefing">NEWS</button><div class="ticker-viewport"><div class="ticker-track" id="tickerTrack"></div></div></div></div><span class="session-pill"><i></i><span id="sessionStatus">READY</span></span></div>
+    <section class="center-stage" aria-label="Assistant and quick actions">
+      <div class="quick-actions">
+        <button data-prompt="Help me organize my day." class="quick"><span>▱</span>Help plan my day</button>
+        <button data-prompt="What can you help me with?" class="quick"><span>☼</span>What can you do?</button>
+        <button data-prompt="Give me a quick status report on my PC." class="quick"><span>▦</span>System report</button>
+        <button data-prompt="Help me brainstorm ideas for " class="quick"><span>⌕</span>Brainstorm ideas</button>
+        <button data-prompt="Play or pause my music." class="quick"><span>♫</span>Play / pause music</button>
+        <button data-prompt="Find the file " class="quick"><span>▣</span>Find a file</button>
+      </div>
+      <div class="core-wrap" id="coreWrap"><div class="orbit orbit-a"></div><div class="orbit orbit-b"></div><div class="orbit orbit-c"></div><div class="core"></div><canvas class="avatar" id="avatar" aria-hidden="true"></canvas><small class="core-state" id="coreState">STANDBY</small><span class="node node-one"></span><span class="node node-two"></span><span class="node node-three"></span></div>
+    </section>
+    <section class="browser-panel panel-cut closed" id="browserPanel" aria-label="Web browser">
+      <div class="browser-bar">
+        <button type="button" id="webBack" title="Back" aria-label="Back">‹</button><button type="button" id="webFwd" title="Forward" aria-label="Forward">›</button><button type="button" id="webReload" title="Reload" aria-label="Reload">⟳</button>
+        <form id="webForm"><input id="webAddress" placeholder="Search Google or enter an address" autocomplete="off" spellcheck="false" aria-label="Address"></form>
+        <button type="button" id="webWide" title="Expand / restore" aria-label="Expand browser">⤢</button><button type="button" id="webClose" title="Close browser" aria-label="Close browser">✕</button>
+      </div>
+      <div class="browser-sites" id="webSites"></div>
+      <div class="browser-frame"><webview id="webView" src="about:blank" partition="persist:jarvis-web" allowpopups></webview><div class="browser-unavailable" id="webUnavailable" hidden>The built-in browser runs in the J.A.R.V.I.S. desktop app.</div></div>
+    </section>
+    <section class="appdock-panel" id="appPanel" hidden aria-label="Docked apps">
+      <div class="appdock-tabs" id="appTabs" role="tablist" aria-label="Docked apps"></div>
+      <div class="appdock-frame" id="appFrame"><span id="appFrameNote">The app appears here.</span></div>
+    </section>
+    <section class="conversation" id="conversation" aria-live="polite" aria-label="Conversation"></section>
+    <form class="composer" id="chatForm"><button type="button" class="mic-button" id="micButton" aria-label="Start hands-free listening">♩</button><input id="messageInput" autocomplete="off" maxlength="6000" placeholder="Ask me anything..." aria-label="Message"><button class="send-button" id="sendButton" type="submit" aria-label="Send message">➤</button></form>
+    <div class="composer-note" id="voiceNote">Click the mic once for hands-free listening. Speech is sent to Gemini for transcription; silence stays on this device.</div>
+  </main>
+  <aside class="right-rail">
+    <section class="info-card panel-cut" id="system"><h2>SYSTEM STATUS</h2>
+      <div class="stat"><span class="status-icon">◷</span><span>CPU</span><b id="statCpu">—</b><i class="bar"><i id="barCpu"></i></i></div>
+      <div class="stat"><span class="status-icon">▤</span><span>Memory</span><b id="statMem">—</b><i class="bar"><i id="barMem"></i></i></div>
+      <div class="stat"><span class="status-icon">⇅</span><span>Network</span><b id="statNet">—</b></div>
+      <div class="stat"><span class="status-icon">▰</span><span>Battery</span><b id="statBat">—</b><i class="bar"><i id="barBat"></i></i></div>
+      <div class="stat"><span class="status-icon">◫</span><span>Disk free</span><b id="statDisk">—</b></div>
+    </section>
+    <section class="info-card panel-cut" id="reminders"><h2>REMINDERS</h2><ul class="list" id="reminderList"></ul></section>
+    <section class="info-card panel-cut" id="memory"><h2>MEMORY</h2><ul class="list" id="memoryList"></ul></section>
+    <div class="service-line"><span></span>I AM AT YOUR SERVICE<span></span></div>
+  </aside>
+</div>
+<div class="toast" id="toast" role="status"></div>
+<div class="confirm-banner panel-cut" id="confirmBanner" role="alertdialog" aria-labelledby="confirmTitle" hidden>
+  <div class="confirm-text"><b id="confirmTitle">J.A.R.V.I.S. requests permission</b><span id="confirmSummary"></span><code id="confirmDetail" hidden></code><small>Say “yes” or “no”, or choose · <span id="confirmTimer">60</span>s</small></div>
+  <div class="confirm-actions"><button type="button" class="allow" id="confirmAllow">Allow</button><button type="button" class="deny" id="confirmDeny">Deny</button></div>
+</div>
+<div class="drawer-backdrop" id="settingsDrawer" hidden>
+  <section class="drawer panel-cut" role="dialog" aria-labelledby="settingsTitle">
+    <header><h2 id="settingsTitle">SETTINGS</h2><button type="button" class="drawer-close" id="settingsClose" aria-label="Close settings">✕</button></header>
+    <div class="setting-group"><b>Profile</b><small>Used for your greeting, weather and news.</small>
+      <div class="setting-fields"><label>Your name<input id="setName" maxlength="40" autocomplete="off" placeholder="e.g. Pardha"></label>
+      <label>Home city<input id="setCity" maxlength="80" autocomplete="off" placeholder="e.g. Dallas, Texas"></label>
+      <label>News topics<input id="setTopics" maxlength="160" autocomplete="off" placeholder="Optional, e.g. technology, markets, Cowboys"></label></div></div>
+    <label class="setting"><span><b>Greet me at startup</b><small>Time, weather, and headlines when J.A.R.V.I.S. opens. Headlines are read at most every 3 hours.</small></span><input type="checkbox" id="setBriefing"></label>
+    <div class="setting-buttons"><button type="button" id="briefNow">Brief me now</button></div>
+    <label class="setting"><span><b>Always listening</b><small>The mic stays on from launch. Say “Jarvis, go to sleep” to pause and “Jarvis, wake up” to resume; the mic button does the same.</small></span><input type="checkbox" id="setAlways"></label>
+    <label class="setting"><span><b>Auto-sleep after silence</b><small>Also fall asleep on its own after the time below.</small></span><input type="checkbox" id="setWake"></label>
+    <label class="setting"><span><b>Sleep after</b><small>Minutes without conversation.</small></span><select id="setSleep"><option value="1">1 min</option><option value="2">2 min</option><option value="5">5 min</option><option value="10">10 min</option><option value="30">30 min</option></select></label>
+    <label class="setting"><span><b>Voice dictation everywhere</b><small>Press Ctrl+Shift+Space in any app, talk, and your words are typed where the cursor is. Takes effect next time J.A.R.V.I.S. starts.</small></span><input type="checkbox" id="setDictation"></label>
+    <label class="setting"><span><b>Open my apps with J.A.R.V.I.S.</b><small>Listener, Gamer, Weber and Streamer start when J.A.R.V.I.S. does, ready as tabs.</small></span><input type="checkbox" id="setLaunchApps"></label>
+    <label class="setting"><span><b>Dock every new app</b><small>Any app window that opens while J.A.R.V.I.S. is up docks into it as a tab. Dialogs and pop-ups stay as they are.</small></span><input type="checkbox" id="setAutoDock"></label>
+    <label class="setting"><span><b>Hide the Windows taskbar</b><small>In full screen the J.A.R.V.I.S. top bar is your taskbar. It comes back when you minimise or close J.A.R.V.I.S.</small></span><input type="checkbox" id="setHideTaskbar"></label>
+    <label class="setting"><span><b>Open apps inside J.A.R.V.I.S.</b><small>Apps opened from the Start menu, dock or by voice are docked into the HUD. Apps Windows won't let me move open normally.</small></span><input type="checkbox" id="setAppsInside"></label>
+    <label class="setting"><span><b>Interface</b><small>The look of J.A.R.V.I.S. in the centre of the HUD.</small></span><select id="setAvatar"><option value="reactor">Arc reactor</option><option value="head">Holographic head</option></select></label>
+    <label class="setting"><span><b>Voice</b><small>Applies to the next live session.</small></span><select id="setVoice"></select></label>
+    <div class="setting-group"><b>Plugins</b><small id="pluginInfo">Drop a .js skill into the plugins folder, then reload.</small>
+      <div class="setting-buttons"><button type="button" data-folder="plugins">Open plugins folder</button><button type="button" id="reloadPlugins">Reload plugins</button></div></div>
+    <div class="setting-group"><b>Folders</b><div class="setting-buttons"><button type="button" data-folder="trash">Jarvis trash</button><button type="button" data-folder="data">Data folder</button><button type="button" data-folder="config">Configuration (.env)</button></div></div>
+    <div class="setting-group"><b>Shortcuts</b><small>Hold <kbd>Ctrl</kbd>+<kbd>Space</kbd> to talk · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>J</kbd> wakes J.A.R.V.I.S. from anywhere · <kbd>Esc</kbd> stops the reply · <kbd>F11</kbd> full screen · <kbd>Ctrl</kbd>+<kbd>Q</kbd> quit · <kbd>Alt</kbd>+<kbd>Tab</kbd> switch apps</small></div>
+    <div class="setting-group"><b>Asks before</b><small>Running commands, deleting or overwriting files, typing or pressing keys, force-quitting apps, and shutdown / restart / sleep / sign-out.</small></div>
+  </section>
+</div>
+<div class="launcher" id="launcher" hidden>
+  <section class="launcher-inner panel-cut" role="dialog" aria-label="J.A.R.V.I.S. Start menu">
+    <header class="launcher-head">
+      <input id="appSearch" placeholder="Search apps…" autocomplete="off" spellcheck="false" aria-label="Search apps">
+      <button type="button" id="toWindows" title="Minimise J.A.R.V.I.S. and use the normal Windows desktop (Ctrl+Shift+J brings it back)">⊞ Windows desktop</button>
+      <button type="button" id="winStart" title="Open the Windows Start menu">Windows Start</button>
+      <button type="button" class="launcher-close" id="launcherClose" aria-label="Close">✕</button>
+    </header>
+    <h3>OPEN WINDOWS <small id="taskCount"></small></h3>
+    <div class="task-grid" id="taskGrid"></div>
+    <h3>ALL APPS <small id="appCount"></small></h3>
+    <div class="app-grid" id="appGrid"></div>
+  </section>
+</div>
+<script src="/avatar.js" defer></script>
+<script src="/app.js" defer></script>
+<script src="/hud.js" defer></script>
+</body></html>
+
+
+
+

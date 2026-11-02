@@ -1,0 +1,13 @@
+.env
+node_modules/
+release/
+.localappdata/
+.electron-cache/
+.appdata/
+.tmp/
+.assistant-preferences.json
+.claude/
+backups/
+.env.*
+!.env.example
+*.log
