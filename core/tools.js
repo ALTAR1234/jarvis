@@ -127,7 +127,8 @@ function loadPlugins() {
 
 const extra = [];
 function addTools(list) { extra.push(...list); }
-const all = () => [...BUILTIN, ...extra, ...plugins];
+// One tool per name (Gemini rejects duplicates): built-ins win, then app tools, then plugins, even when plugins loaded first.
+const all = () => { const seen = new Set(); return [...BUILTIN, ...extra, ...plugins].filter((t) => !seen.has(t.name) && seen.add(t.name)); };
 function declarations() { return all().map(({ name, description, parameters }) => ({ name, description, parameters })); }
 
 function autoApproved(name) { return String(process.env.AUTO_APPROVE || '').split(',').map((s) => s.trim()).includes(name); }
