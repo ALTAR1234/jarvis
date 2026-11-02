@@ -90,6 +90,8 @@ async function createWindow() {
 `); } catch {} }), 4000)); // after the HUD has laid out its app area
   // Ctrl+Shift+Space from anywhere: voice dictation into whatever app has focus.
   if (prefs.dictation !== false) setupDictation();
+  // Ctrl+Alt+J from anywhere: Vision. Freeze the screen, box anything, ask about it.
+  if (prefs.vision !== false) setupVision();
   // Ctrl+Shift+J from anywhere: wake J.A.R.V.I.S. (or start a live conversation).
   globalShortcut.register('CommandOrControl+Shift+J', () => {
     if (!mainWindow) return;
@@ -119,6 +121,53 @@ function setupDictation() {
     dictateWin.webContents.executeJavaScript('window.dictate && window.dictate.toggle()').catch(() => {});
   });
 }
+// Vision: the hotkey takes a full-resolution screenshot of the screen the mouse is on, then covers
+// that screen with vision.html showing it frozen. The page sets its title to "close" when done.
+let visionWin = null;
+function setupVision() {
+  const { screen, desktopCapturer } = require('electron');
+  globalThis.jarvisVision = { shot: null };
+  const close = () => { if (visionWin && !visionWin.isDestroyed()) visionWin.hide(); globalThis.jarvisVision.shot = null; };
+  globalShortcut.register('CommandOrControl+Alt+J', async () => {
+    if (visionWin?.isVisible()) return close();
+    const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+    const size = { width: Math.round(display.size.width * display.scaleFactor), height: Math.round(display.size.height * display.scaleFactor) };
+    const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: size }).catch(() => []);
+    const source = sources.find((s) => String(s.display_id) === String(display.id)) || sources[0];
+    if (!source) return;
+    globalThis.jarvisVision.shot = source.thumbnail.toJPEG(92);
+    if (!visionWin || visionWin.isDestroyed()) {
+      visionWin = new BrowserWindow({ frame: false, resizable: false, movable: false, skipTaskbar: true, show: false, backgroundColor: '#000000', alwaysOnTop: true, fullscreenable: false,
+        webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true } });
+      visionWin.setAlwaysOnTop(true, 'screen-saver');
+      visionWin.on('page-title-updated', (_e, title) => { if (title === 'close') close(); });
+      visionWin.on('closed', () => { visionWin = null; });
+    }
+    visionWin.setBounds(display.bounds);
+    await visionWin.loadURL(`${appOrigin}/vision.html?t=${Date.now()}`);
+    visionWin.show();
+    visionWin.focus();
+  });
+}
+// Inboxer and Helper: J.A.R.V.I.S.'s own app windows, served by its server and kept above the HUD.
+const panels = {};
+const PANELS = { inboxer: { title: 'Inboxer', width: 1100, height: 820 }, helper: { title: 'Helper', width: 1180, height: 840 }, dreamer: { title: 'Dreamer', width: 1400, height: 900, maximize: true } };
+globalThis.jarvisFocusHud = () => { if (!mainWindow) return; if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); };
+globalThis.jarvisOpenPanel = async (name) => {
+  const spec = PANELS[name];
+  if (!spec || !appOrigin) return;
+  const open = panels[name];
+  if (open && !open.isDestroyed()) { if (open.isMinimized()) open.restore(); open.show(); open.focus(); return; }
+  const win = new BrowserWindow({ width: spec.width, height: spec.height, minWidth: 720, minHeight: 560, title: spec.title, parent: mainWindow || undefined, autoHideMenuBar: true, backgroundColor: '#030913',
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true } });
+  win.setMenuBarVisibility(false);
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.on('will-navigate', (e, url) => { if (!isAppOrigin(url)) e.preventDefault(); });
+  win.on('closed', () => { delete panels[name]; });
+  panels[name] = win;
+  if (spec.maximize) win.maximize();
+  await win.loadURL(`${appOrigin}/${name}.html`);
+};
 app.whenReady().then(createWindow).catch((error) => { console.error('Could not start the assistant app:', error.message); app.quit(); });
 app.on('window-all-closed', () => app.quit());
 // Hand a docked app back its own window before quitting, so it keeps running normally.

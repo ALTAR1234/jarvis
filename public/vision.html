@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Jarvis Visioner</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' blob:; style-src 'self'; script-src 'self'; media-src 'self' blob:; connect-src 'self'">
+<link rel="stylesheet" href="vision.css">
+</head>
+<body>
+  <img id="shot" src="/api/vision/shot" alt="" draggable="false">
+  <div id="dim"></div>
+  <div id="box" hidden></div>
+  <div id="hint"><span class="core"></span><b>Jarvis Visioner</b><span>Drag around anything · <kbd>Enter</kbd> whole screen · <kbd>Esc</kbd> close</span></div>
+  <section id="card" hidden>
+    <header><span class="core"></span><b>Jarvis Visioner</b><button id="again" title="Pick something else">New pick</button><button id="close" title="Close (Esc)">✕</button></header>
+    <div id="chips">
+      <button data-q="Explain what this is, simply.">Explain</button>
+      <button data-q="Summarize this.">Summarize</button>
+      <button data-q="What does this error mean and how do I fix it?">Fix this error</button>
+      <button data-q="Translate this into English.">Translate</button>
+      <button data-q="Which option here is the best deal, and why?">Best deal?</button>
+      <button data-q="What should I do next here?">What next?</button>
+    </div>
+    <div id="thread"></div>
+    <form id="ask"><input id="q" placeholder="Ask about this…" autocomplete="off" spellcheck="false"><button type="button" id="mic" title="Ask out loud"><i></i></button><button id="go" title="Ask">➜</button></form>
+  </section>
+  <script src="vision.js"></script>
+</body>
+</html>

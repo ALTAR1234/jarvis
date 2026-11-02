@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Inboxer</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'">
+<link rel="stylesheet" href="panels.css">
+<link rel="stylesheet" href="inboxer.css">
+</head>
+<body>
+  <div class="wrap">
+    <header class="head">
+      <span class="core"></span>
+      <div><h1>Inboxer</h1><p id="sub">Everything waiting for you, sorted by J.A.R.V.I.S.</p></div>
+      <span class="grow"></span>
+      <button class="btn" id="refresh">↻ Refresh</button>
+    </header>
+    <div id="sources" class="sources"></div>
+    <div class="tabs" id="tabs"></div>
+    <div id="list"><div class="empty">Looking through everything…</div></div>
+  </div>
+  <div class="toast" id="toast" hidden></div>
+  <script src="inboxer.js"></script>
+</body>
+</html>

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Helper</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'">
+<link rel="stylesheet" href="panels.css">
+<link rel="stylesheet" href="helper.css">
+</head>
+<body>
+  <div class="wrap">
+    <header class="head">
+      <span class="core"></span>
+      <div><h1>Helper</h1><p>Drop in an assignment. J.A.R.V.I.S. plans it, reminds you, and quizzes you.</p></div>
+    </header>
+    <form id="add" class="card add">
+      <div class="drop" id="drop"><input type="file" id="file" accept="image/png,image/jpeg,image/webp,application/pdf" hidden><b>Drop a photo or PDF of the worksheet</b><span>or click to pick one · optional</span></div>
+      <div class="fields">
+        <label class="lbl">What is it?<input class="field" id="title" placeholder="e.g. Chapter 5 math worksheet, history essay on the Cold War" maxlength="120"></label>
+        <div class="row2">
+          <label class="lbl">Due<input class="field" id="due" type="date"></label>
+          <label class="lbl grow">Notes<input class="field" id="notes" placeholder="Anything else: length, rubric, what you find hard…" maxlength="2000"></label>
+        </div>
+        <button class="btn primary" id="make">Make my plan</button>
+      </div>
+    </form>
+    <div class="layout">
+      <aside id="list"></aside>
+      <section id="detail" class="card detail"><div class="empty">Add an assignment above to get a plan, reminders and a practice quiz.</div></section>
+    </div>
+  </div>
+  <div class="toast" id="toast" hidden></div>
+  <script src="helper.js"></script>
+</body>
+</html>

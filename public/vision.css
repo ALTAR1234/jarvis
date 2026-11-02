@@ -1,0 +1,64 @@
+/* Jarvis Visioner: the frozen screen, a selection box, and a glass answer card in the HUD's colours. */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font: 500 14px/1.5 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif; color: #e6f7ff; user-select: none; cursor: crosshair; }
+button, input { font: inherit; color: inherit; }
+[hidden] { display: none !important; }
+#shot { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: fill; }
+#dim { position: fixed; inset: 0; background: rgb(2 10 20 / .42); transition: opacity .2s; }
+body.picked #dim { opacity: 0; }
+#box { position: fixed; border-radius: 8px; box-shadow: 0 0 0 9999px rgb(2 10 20 / .5), 0 0 0 1.5px #38cfff, 0 0 24px rgb(56 207 255 / .55); pointer-events: none; }
+#box::after { content: ''; position: absolute; inset: -1.5px; border-radius: 9px; background: linear-gradient(90deg, transparent, rgb(56 207 255 / .35), transparent) 0 0 / 200% 100%; animation: scan 2.2s linear infinite; opacity: 0; }
+body.thinking #box::after { opacity: 1; }
+@keyframes scan { to { background-position: -200% 0; } }
+
+.core { flex: none; width: 22px; height: 22px; border-radius: 50%; background: radial-gradient(circle, #bff3ff 0 12%, #38cfff 30%, #0a4f86 70%); box-shadow: 0 0 14px #38cfff; }
+body.thinking .core { animation: pulse .7s ease-in-out infinite alternate; }
+@keyframes pulse { to { transform: scale(1.2); box-shadow: 0 0 22px #4fd8ff; } }
+#hint {
+  position: fixed; top: 22px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; padding: 10px 18px 10px 12px; border-radius: 999px;
+  background: rgb(2 16 30 / .9); box-shadow: inset 0 0 0 1px rgb(56 207 255 / .4), 0 10px 30px rgb(0 0 0 / .5); white-space: nowrap; pointer-events: none;
+}
+#hint span:last-child { color: rgb(205 239 255 / .7); }
+kbd { font: 600 11.5px 'Cascadia Code', Consolas, monospace; padding: 1px 6px; border-radius: 5px; background: rgb(56 207 255 / .16); color: #bff3ff; }
+body.picked #hint { display: none; }
+
+#card {
+  position: fixed; width: 420px; max-height: calc(100vh - 40px); display: flex; flex-direction: column; border-radius: 18px; overflow: hidden; cursor: default; user-select: text;
+  background: linear-gradient(180deg, rgb(8 26 44 / .94), rgb(3 14 26 / .96)); backdrop-filter: blur(18px);
+  box-shadow: inset 0 0 0 1px rgb(56 207 255 / .35), inset 0 1px 0 rgb(191 243 255 / .2), 0 24px 60px rgb(0 0 0 / .6), 0 0 40px rgb(0 140 255 / .18);
+  animation: rise .22s cubic-bezier(.2, .9, .3, 1);
+}
+@keyframes rise { from { opacity: 0; transform: translateY(8px) scale(.98); } }
+#card header { display: flex; align-items: center; gap: 10px; padding: 12px 12px 10px 14px; border-bottom: 1px solid rgb(56 207 255 / .14); user-select: none; }
+#card header b { flex: 1; letter-spacing: .03em; }
+#card header button { height: 28px; padding: 0 10px; border: 0; border-radius: 8px; background: rgb(56 207 255 / .1); font-size: 12.5px; font-weight: 600; cursor: pointer; }
+#card header button:hover { background: rgb(56 207 255 / .22); }
+#chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 14px 4px; }
+#chips button { height: 30px; padding: 0 12px; border: 0; border-radius: 999px; background: rgb(56 207 255 / .1); box-shadow: inset 0 0 0 1px rgb(56 207 255 / .28); font-size: 12.5px; font-weight: 600; cursor: pointer; }
+#chips button:hover { background: rgb(56 207 255 / .22); }
+#thread { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 16px; }
+#thread:empty { display: none; }
+.q { margin: 10px 0 4px; color: #7fdcff; font-weight: 700; font-size: 13px; }
+.a { margin: 0 0 8px; line-height: 1.55; }
+.a p { margin: 0 0 8px; }
+.a ul, .a ol { margin: 0 0 8px; padding-left: 20px; }
+.a code { font: 12.5px 'Cascadia Code', Consolas, monospace; padding: 1px 5px; border-radius: 5px; background: rgb(56 207 255 / .12); color: #bff3ff; }
+.a pre { margin: 0 0 8px; padding: 10px 12px; border-radius: 10px; background: rgb(0 0 0 / .4); overflow-x: auto; }
+.a pre code { padding: 0; background: none; }
+.a b { color: #fff; }
+.a h4 { margin: 10px 0 4px; font-size: 14px; }
+.copy { border: 0; background: none; color: rgb(127 220 255 / .8); font-size: 12px; font-weight: 600; cursor: pointer; padding: 0; }
+.copy:hover { color: #fff; }
+.err { color: #ff8aa0; }
+.typing { display: flex; gap: 5px; padding: 8px 0 12px; }
+.typing i { width: 7px; height: 7px; border-radius: 50%; background: #38cfff; animation: blink 1s infinite; }
+.typing i:nth-child(2) { animation-delay: .15s; } .typing i:nth-child(3) { animation-delay: .3s; }
+@keyframes blink { 50% { opacity: .25; } }
+#ask { display: flex; gap: 6px; padding: 10px 12px 12px; border-top: 1px solid rgb(56 207 255 / .14); }
+#q { flex: 1; min-width: 0; height: 40px; padding: 0 14px; border: 0; border-radius: 12px; background: rgb(0 0 0 / .35); box-shadow: inset 0 0 0 1px rgb(56 207 255 / .25); outline: none; }
+#q:focus { box-shadow: inset 0 0 0 1.5px #38cfff; }
+#ask button { width: 40px; height: 40px; border: 0; border-radius: 12px; display: grid; place-items: center; background: rgb(56 207 255 / .14); cursor: pointer; font-size: 16px; }
+#ask #go { background: #38cfff; color: #021220; font-weight: 800; }
+#mic i { width: 14px; height: 14px; border-radius: 50%; border: 2px solid #38cfff; box-shadow: 0 0 8px #38cfff; }
+#mic.on { background: radial-gradient(circle, #38cfff, #0a84ff); }
+#mic.on i { border-color: #fff; animation: pulse .6s ease-in-out infinite alternate; }

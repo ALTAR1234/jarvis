@@ -1,0 +1,30 @@
+/* Dreamer: your apps as things in a small isometric room that follows the real time and weather. */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+body { background: var(--sky, #0b1222); color: #eaf6ff; font: 600 14px/1.4 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif; user-select: none; transition: background 2s; }
+body::before { content: ''; position: fixed; inset: 0; background: radial-gradient(60% 60% at 50% 55%, rgb(255 255 255 / .06), transparent 70%); pointer-events: none; }
+#top { position: fixed; left: 28px; right: 28px; top: 20px; display: flex; justify-content: space-between; align-items: flex-start; z-index: 2; pointer-events: none; }
+#clock { display: block; font-size: 40px; font-weight: 750; letter-spacing: -.02em; line-height: 1; }
+#date { color: rgb(234 246 255 / .7); font-size: 15px; }
+#wx { text-align: right; font-size: 15px; color: rgb(234 246 255 / .8); }
+#wx b { display: block; font-size: 26px; color: #fff; }
+#stage { position: fixed; inset: 0; display: grid; place-items: center; perspective: 1600px; }
+#room { width: min(100vw, 150vh); height: 100vh; transform-style: preserve-3d; transition: transform .25s ease-out; overflow: visible; }
+.obj { cursor: pointer; transition: transform .25s cubic-bezier(.2, .9, .3, 1.4), filter .2s; transform-box: fill-box; transform-origin: 50% 100%; }
+.obj:hover { transform: translateY(-8px); filter: brightness(1.18) drop-shadow(0 0 14px rgb(120 220 255 / .55)); }
+.obj:active { transform: translateY(-3px) scale(.98); }
+.spin { animation: spin 1.8s linear infinite; transform-box: fill-box; transform-origin: center; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.float { animation: float 3.2s ease-in-out infinite; }
+@keyframes float { 50% { transform: translateY(-10px); } }
+.pulse { animation: pulse 2.4s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .55; } }
+.tvglow { animation: tv 3s ease-in-out infinite alternate; }
+@keyframes tv { to { opacity: .55; } }
+.rain line { animation: rain .7s linear infinite; }
+@keyframes rain { from { transform: translate(0, -60px); } to { transform: translate(-10px, 60px); } }
+.note { animation: note 2.6s ease-out infinite; opacity: 0; }
+@keyframes note { 0% { opacity: 0; transform: translate(0, 0); } 15% { opacity: 1; } 100% { opacity: 0; transform: translate(18px, -70px); } }
+#tip { position: fixed; z-index: 3; padding: 8px 13px; border-radius: 11px; background: rgb(6 16 30 / .92); box-shadow: inset 0 0 0 1px rgb(120 220 255 / .3), 0 10px 26px rgb(0 0 0 / .45); pointer-events: none; white-space: nowrap; }
+#tip small { display: block; color: rgb(234 246 255 / .65); font-weight: 500; }
+#toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); padding: 11px 18px; border-radius: 12px; background: rgb(6 16 30 / .95); box-shadow: inset 0 0 0 1px rgb(120 220 255 / .3); }
