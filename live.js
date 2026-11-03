@@ -48,6 +48,8 @@ function bridge(client, { systemPrompt, tools, voice }) {
       generationConfig: { responseModalities: ['AUDIO'], speechConfig: { languageCode: 'en-GB', voiceConfig: { prebuiltVoiceConfig: { voiceName } } } },
       systemInstruction: { parts: [{ text: systemPrompt(timeZone) }] },
       tools: [{ functionDeclarations: tools.declarations() }, ...(search ? [{ googleSearch: {} }] : [])],
+      // Let people pause mid-sentence without being cut off.
+      realtimeInputConfig: { automaticActivityDetection: { endOfSpeechSensitivity: 'END_SENSITIVITY_LOW', prefixPaddingMs: 300, silenceDurationMs: 1200 } },
       inputAudioTranscription: {},
       outputAudioTranscription: {},
       contextWindowCompression: { slidingWindow: {} },

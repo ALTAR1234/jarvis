@@ -159,6 +159,7 @@ async function transcribeOpenAI(audio, contentType) {
   const form = new FormData();
   form.append('file', new Blob([audio], { type }), `voice.${type.split('/')[1] || 'webm'}`);
   form.append('model', process.env.OPENAI_ASR_MODEL || 'gpt-4o-mini-transcribe');
+  form.append('prompt', 'Someone talking to their voice assistant, Jarvis.');
   const r = await fetch('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', headers: { authorization: `Bearer ${key}` }, body: form, signal: AbortSignal.timeout(60000) });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw Object.assign(new Error(`OpenAI speech recognition failed (${r.status}).`), { status: r.status === 429 ? 429 : 502 });

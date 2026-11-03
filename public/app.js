@@ -119,30 +119,44 @@ async function processUtterance(blob) {
   }
   if (handsFreeEnabled) updateState('listening');
 }
-function chooseMime() { return ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus'].find((type) => MediaRecorder.isTypeSupported(type)) || ''; }
-function beginUtterance() {
-  if (!micStream || recorder || busy || currentAudio && !currentAudio.paused) return;
-  const mime = chooseMime(); recorder = mime ? new MediaRecorder(micStream, { mimeType: mime }) : new MediaRecorder(micStream);
-  recordingChunks = []; recorder.ondataavailable = (event) => { if (event.data.size) recordingChunks.push(event.data); };
-  recorder.onerror = () => { recorder = null; recordingChunks = []; updateState('error'); showToast('Microphone capture failed.'); setTimeout(() => updateState('listening'), 1800); };
-  recorder.onstop = () => { clearTimeout(recordingTimer); const tooShort = Date.now() - utteranceStartedAt < 1300; const blob = new Blob(recordingChunks, { type: mime || recordingChunks[0]?.type || 'audio/webm' }); recordingChunks = []; recorder = null; if (handsFreeEnabled && !tooShort) processUtterance(blob); };
-  recorder.start(); lastSpeechAt = utteranceStartedAt = Date.now(); updateState('listening');
-  recordingTimer = setTimeout(() => { if (recorder?.state === 'recording') recorder.stop(); }, 20000);
-}
-function runVAD() {
-  if (!handsFreeEnabled || !analyser) return;
-  const samples = new Float32Array(analyser.fftSize); analyser.getFloatTimeDomainData(samples);
-  let sum = 0; for (const value of samples) sum += value * value;
-  const rms = Math.sqrt(sum / samples.length);
-  const threshold = Math.max(0.026, noiseFloor * 3.6);
-  if (!recorder && !busy && !(currentAudio && !currentAudio.paused)) noiseFloor = noiseFloor * 0.96 + rms * 0.04;
-  if (!busy && !(currentAudio && !currentAudio.paused)) {
-    if (rms > threshold) { speechFrames++; if (recorder) lastSpeechAt = Date.now(); }
-    else speechFrames = 0;
-    if (!recorder && speechFrames >= 8) { speechFrames = 0; beginUtterance(); }
+// Regular voice captures raw 40 ms blocks and keeps the half second before speech starts, so the
+// first word ("Jarvis") is never clipped. A phrase ends after 1.4 s of quiet and goes up as a WAV.
+const PRE_BLOCKS = 13, END_QUIET = 35, MAX_BLOCKS = 500, MIN_VOICED = 8;
+let micNode = null, preroll = [], utter = null, quietBlocks = 0, loudBlocks = 0, voicedBlocks = 0;
+function onRegularBlock(block) {
+  if (!handsFreeEnabled) return;
+  let sum = 0; for (let i = 0; i < block.length; i++) sum += block[i] * block[i];
+  const rms = Math.sqrt(sum / block.length);
+  if (busy || currentAudio && !currentAudio.paused) { utter = null; preroll = []; loudBlocks = 0; return; }
+  const threshold = Math.max(0.02, noiseFloor * 3.2);
+  if (!utter) {
+    noiseFloor = noiseFloor * 0.97 + Math.min(rms, 0.05) * 0.03;
+    preroll.push(block); if (preroll.length > PRE_BLOCKS) preroll.shift();
+    loudBlocks = rms > threshold ? loudBlocks + 1 : 0;
+    if (loudBlocks >= 3) { utter = preroll; preroll = []; quietBlocks = 0; voicedBlocks = loudBlocks; loudBlocks = 0; recorder = true; updateState('listening'); }
+    return;
   }
-  if (recorder && Date.now() - lastSpeechAt > 950) recorder.stop();
-  vadFrame = requestAnimationFrame(runVAD);
+  utter.push(block);
+  if (rms > threshold) { quietBlocks = 0; voicedBlocks++; } else quietBlocks++;
+  if (quietBlocks >= END_QUIET || utter.length >= MAX_BLOCKS) {
+    const blocks = utter; utter = null; recorder = null;
+    if (voicedBlocks >= MIN_VOICED) processUtterance(toWav(blocks, audioContext.sampleRate));
+  }
+}
+// 16 kHz mono 16-bit WAV: small to upload, and every speech service reads it.
+function toWav(blocks, rate) {
+  const total = blocks.reduce((n, b) => n + b.length, 0), step = rate / 16000, count = Math.floor(total / step);
+  const all = new Float32Array(total); let o = 0; for (const b of blocks) { all.set(b, o); o += b.length; }
+  const view = new DataView(new ArrayBuffer(44 + count * 2));
+  const text = (at, s) => { for (let i = 0; i < s.length; i++) view.setUint8(at + i, s.charCodeAt(i)); };
+  text(0, 'RIFF'); view.setUint32(4, 36 + count * 2, true); text(8, 'WAVE'); text(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+  view.setUint32(24, 16000, true); view.setUint32(28, 32000, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true); text(36, 'data'); view.setUint32(40, count * 2, true);
+  for (let i = 0; i < count; i++) {
+    const a = Math.floor(i * step), b = Math.min(total, Math.floor((i + 1) * step)); let v = 0;
+    for (let j = a; j < b; j++) v += all[j]; v /= Math.max(1, b - a);
+    view.setInt16(44 + i * 2, Math.max(-1, Math.min(1, v)) * 0x7fff, true);
+  }
+  return new Blob([view.buffer], { type: 'audio/wav' });
 }
 async function enableHandsFree() {
   if (handsFreeEnabled && micStream) return;
@@ -152,7 +166,9 @@ async function enableHandsFree() {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
     if (!handsFreeEnabled) { stream.getTracks().forEach((track) => track.stop()); return; }
     micStream = stream; audioContext = new AudioContext(); await audioContext.resume(); analyser = audioContext.createAnalyser(); analyser.fftSize = 1024; sourceNode = audioContext.createMediaStreamSource(stream); sourceNode.connect(analyser); avatar?.attach({ input: analyser });
-    await savePreferences({ handsFree: true }); updateHandsFreeUI(); updateState('listening'); cancelAnimationFrame(vadFrame); vadFrame = requestAnimationFrame(runVAD);
+    await audioContext.audioWorklet.addModule('/mic-worklet.js'); micNode = new AudioWorkletNode(audioContext, 'mic-capture'); micNode.port.onmessage = (e) => onRegularBlock(e.data); sourceNode.connect(micNode);
+    preroll = []; utter = null; recorder = null;
+    await savePreferences({ handsFree: true }); updateHandsFreeUI(); updateState('listening');
   } catch (err) {
     if (micStream) micStream.getTracks().forEach((track) => track.stop()); micStream = null;
     if (audioContext) { audioContext.close().catch(() => {}); audioContext = null; }
@@ -162,7 +178,7 @@ async function enableHandsFree() {
 }
 async function disableHandsFree() {
   handsFreeEnabled = false; await savePreferences({ handsFree: false }); updateHandsFreeUI(); cancelAnimationFrame(vadFrame); clearTimeout(recordingTimer);
-  if (recorder?.state === 'recording') recorder.stop();
+  if (micNode) { micNode.port.onmessage = null; micNode.disconnect(); micNode = null; } utter = null; preroll = []; recorder = null;
   if (micStream) micStream.getTracks().forEach((track) => track.stop()); micStream = null; analyser = null; sourceNode = null;
   if (audioContext) { audioContext.close().catch(() => {}); audioContext = null; }
   updateState('idle');
@@ -189,7 +205,7 @@ async function speak(text) {
 // plays 24 kHz reply audio gaplessly, shows both transcripts, and supports barge-in. After a quiet spell it
 // sleeps (connection closed, mic stays local) and wakes when it hears "Jarvis", Ctrl+Space, or Ctrl+Shift+J.
 const live = (() => {
-  const IN_RATE = 16000, OUT_RATE = 24000, PREROLL = 8, HANGOVER = 25, WAKE_HANGOVER = 15, WAKE_MAX = 150;
+  const IN_RATE = 16000, OUT_RATE = 24000, PREROLL = 13, HANGOVER = 35, WAKE_HANGOVER = 15, WAKE_MAX = 150;
   const WAKE = /\b(jarvis|jarvis's|jervis|javis|jarvas)\b/i;
   const s = {
     on: false, ready: false, ws: null, handle: null, attempts: 0, stopping: false,
