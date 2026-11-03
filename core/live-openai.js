@@ -53,7 +53,7 @@ function openaiLive({ history, timeZone }, { toClient, systemPrompt, tools, onCl
         // Waits through mid-sentence pauses. Replies are started here, only for speech meant for Jarvis,
         // so games, videos and other people in the room are ignored.
         turn_detection: { type: 'server_vad', threshold: 0.55, prefix_padding_ms: 300, silence_duration_ms: 900, create_response: false, interrupt_response: false },
-        transcription: { model: process.env.OPENAI_ASR_MODEL || 'gpt-4o-mini-transcribe', language: 'en', prompt: `Someone talking to their voice assistant, Jarvis. ${voicefix.hint()}`.slice(0, 900) }
+        transcription: { model: process.env.OPENAI_ASR_MODEL || 'gpt-4o-transcribe', language: 'en', prompt: `Someone talking to their voice assistant, Jarvis. ${voicefix.hint()}`.slice(0, 900) }
       },
       output: { format: { type: 'audio/pcm', rate: 24000 }, voice: process.env.OPENAI_LIVE_VOICE || 'cedar' }
     },

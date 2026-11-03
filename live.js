@@ -6,6 +6,15 @@
 const { WebSocketServer, WebSocket } = require('ws');
 const { openaiLive } = require('./core/live-openai');
 const voicefix = require('./core/voicefix');
+const brains = require('./core/brains');
+
+// 16 kHz mono PCM16 pieces -> one WAV file.
+function pcmWav(parts) {
+  const pcm = Buffer.concat(parts), h = Buffer.alloc(44);
+  h.write('RIFF', 0); h.writeUInt32LE(36 + pcm.length, 4); h.write('WAVE', 8); h.write('fmt ', 12); h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22);
+  h.writeUInt32LE(16000, 24); h.writeUInt32LE(32000, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34); h.write('data', 36); h.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([h, pcm]);
+}
 
 const LIVE_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
 const MAX_FRAME = 512 * 1024;
@@ -33,7 +42,14 @@ function attachLive(server, { systemPrompt, tools, voice, trusted, engine = () =
 }
 
 function bridge(client, { systemPrompt, tools, voice, engine }) {
-  let upstream = null, ready = false, chatgpt = null, started = null;
+  let upstream = null, ready = false, chatgpt = null, started = null, heard = [];
+  // Gemini Live's own transcript is not held to English; OpenAI re-reads each utterance (the model still hears the audio itself).
+  function betterTranscript() {
+    const parts = heard; heard = [];
+    const bytes = parts.reduce((n, p) => n + p.length, 0);
+    if (!process.env.OPENAI_API_KEY || bytes < 16000) return; // under half a second
+    brains.transcribeOpenAI(pcmWav(parts), 'audio/wav').then((text) => { if (text) toClient({ type: 'inputFix', text: voicefix.apply(text) }); }).catch(() => {});
+  }
   const toClient = (msg) => { if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify(msg)); };
   const toUpstream = (msg) => { if (ready && upstream?.readyState === WebSocket.OPEN) upstream.send(JSON.stringify(msg)); };
   const fail = (message) => { toClient({ type: 'error', message }); client.close(); };
@@ -64,7 +80,7 @@ function bridge(client, { systemPrompt, tools, voice, engine }) {
       systemInstruction: { parts: [{ text: systemPrompt(timeZone) }] },
       tools: [{ functionDeclarations: tools.declarations() }, ...(search ? [{ googleSearch: {} }] : [])],
       // Let people pause mid-sentence without being cut off.
-      realtimeInputConfig: { automaticActivityDetection: { endOfSpeechSensitivity: 'END_SENSITIVITY_LOW', prefixPaddingMs: 300, silenceDurationMs: 1200 } },
+      realtimeInputConfig: { automaticActivityDetection: { endOfSpeechSensitivity: 'END_SENSITIVITY_LOW', silenceDurationMs: 1200 } },
       inputAudioTranscription: {},
       outputAudioTranscription: {},
       contextWindowCompression: { slidingWindow: {} },
@@ -84,7 +100,8 @@ function bridge(client, { systemPrompt, tools, voice, engine }) {
       const sc = msg.serverContent;
       if (sc) {
         for (const part of sc.modelTurn?.parts || []) if (part.inlineData?.data) toClient({ type: 'audio', data: part.inlineData.data });
-        if (sc.inputTranscription?.text) toClient({ type: 'input', text: voicefix.apply(sc.inputTranscription.text) });
+        // with an OpenAI key the accurate transcript comes from betterTranscript() instead
+        if (sc.inputTranscription?.text && !process.env.OPENAI_API_KEY) toClient({ type: 'input', text: voicefix.apply(sc.inputTranscription.text) });
         if (sc.outputTranscription?.text) toClient({ type: 'output', text: sc.outputTranscription.text });
         if (sc.interrupted) toClient({ type: 'interrupted' });
         if (sc.turnComplete) toClient({ type: 'turnComplete' });
@@ -120,8 +137,8 @@ function bridge(client, { systemPrompt, tools, voice, engine }) {
       else if (msg.type === 'audioEnd') chatgpt.audioEnd();
       else if (msg.type === 'text' && typeof msg.text === 'string' && msg.text.trim()) chatgpt.text(msg.text.trim().slice(0, 6000));
     }
-    else if (msg.type === 'audio' && typeof msg.data === 'string') toUpstream({ realtimeInput: { audio: { data: msg.data, mimeType: 'audio/pcm;rate=16000' } } });
-    else if (msg.type === 'audioEnd') toUpstream({ realtimeInput: { audioStreamEnd: true } });
+    else if (msg.type === 'audio' && typeof msg.data === 'string') { if (ready) heard.push(Buffer.from(msg.data, 'base64')); if (heard.length > 1500) heard.shift(); toUpstream({ realtimeInput: { audio: { data: msg.data, mimeType: 'audio/pcm;rate=16000' } } }); }
+    else if (msg.type === 'audioEnd') { toUpstream({ realtimeInput: { audioStreamEnd: true } }); betterTranscript(); }
     else if (msg.type === 'text' && typeof msg.text === 'string' && msg.text.trim()) toUpstream({ realtimeInput: { text: msg.text.trim().slice(0, 6000) } });
   });
   client.on('close', () => { if (upstream && upstream.readyState <= WebSocket.OPEN) upstream.close(); chatgpt?.close(); });

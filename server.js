@@ -136,7 +136,12 @@ async function createReply(messages, opts) {
 }
 async function transcribeSpeech(audio, type) {
   if (voiceProvider() === 'fish') return { value: await transcribeWithFish(audio, type), via: 'Fish Audio' };
-  if (readPreferences().liveEngine === 'chatgpt' && process.env.OPENAI_API_KEY) return { value: await brains.transcribeOpenAI(audio, type), via: 'OpenAI' };
+  // OpenAI's transcriber, held to English and given the user's words, is far more accurate than Gemini's; Gemini is the backup.
+  if (process.env.OPENAI_API_KEY) {
+    try { return { value: await brains.transcribeOpenAI(audio, type), via: 'OpenAI' }; }
+    catch (err) { if (err.status === 422 || !process.env.GEMINI_API_KEY) throw err; console.warn('OpenAI transcription failed, using Gemini:', err.message); }
+    return { value: await transcribeWithGemini(audio, type), via: 'Gemini' };
+  }
   return withBackup('voice', backupVoice(), () => transcribeWithGemini(audio, type), async (b) => (b === 'openai' ? { value: await brains.transcribeOpenAI(audio, type), via: 'OpenAI' } : { value: await transcribeWithFish(audio, type), via: 'Fish Audio' }));
 }
 async function synthesizeSpeech(text) {

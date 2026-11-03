@@ -353,7 +353,20 @@ const live = (() => {
 
   function remember(role, content) { content = content.trim(); if (!content) return; messages.push({ role, content }); while (messages.length > 20) messages.shift(); }
   // "Jarvis, go to sleep" (but not "I'm going to sleep"): let the goodnight reply finish, then sleep.
-  function finishUser() { if (s.userEl) { const said = fixHeard(s.userText); if (said !== s.userText) s.userEl.textContent = said; remember('user', said); s.userEl = null; s.userText = ''; window.onUserSpeech?.(''); if (isSleepCommand(said)) sleepAfterReply(); } }
+  // The accurate (OpenAI) transcript of what the user just said. It can land after Jarvis has started
+  // replying, so it goes above that reply, on screen and in the history.
+  function fixLastUser(text) {
+    text = fixHeard(String(text || '').trim()); if (!text) return;
+    if (s.userEl) { s.userText = text; s.userEl.textContent = text; return; }
+    const el = addMessage('user', text);
+    const replying = s.botEl || (s.lastBotEl && Date.now() - s.lastBotAt < 15000 ? s.lastBotEl : null);
+    if (replying) convo.insertBefore(el, replying);
+    const last = messages[messages.length - 1];
+    if (!s.botEl && last?.role === 'assistant' && replying) { messages.splice(messages.length - 1, 0, { role: 'user', content: text }); while (messages.length > 20) messages.shift(); }
+    else remember('user', text);
+    if (isSleepCommand(text)) sleepAfterReply();
+  }
+  function finishUser() { if (s.userEl) { s.lastUserEl = s.userEl; s.lastUserAt = Date.now(); const said = fixHeard(s.userText); if (said !== s.userText) s.userEl.textContent = said; remember('user', said); s.userEl = null; s.userText = ''; window.onUserSpeech?.(''); if (isSleepCommand(said)) sleepAfterReply(); } }
   function sleepAfterReply() {
     if (!s.on || s.asleep || s.sleepPending) return;
     s.sleepPending = true; s.turnDone = false;
@@ -368,7 +381,7 @@ const live = (() => {
     setTimeout(tick, 300);
   }
   function finishBot(suffix = '') {
-    if (s.botEl) { if (suffix) s.botEl.textContent = s.botText.trim() + suffix; remember('assistant', s.botText); s.botEl = null; s.botText = ''; }
+    if (s.botEl) { if (suffix) s.botEl.textContent = s.botText.trim() + suffix; remember('assistant', s.botText); s.lastBotEl = s.botEl; s.lastBotAt = Date.now(); s.botEl = null; s.botText = ''; }
   }
   function append(kind, text) {
     touch();
@@ -399,6 +412,7 @@ const live = (() => {
       }
       else if (m.type === 'audio') playChunk(m.data);
       else if (m.type === 'input' || m.type === 'output') append(m.type, m.text);
+      else if (m.type === 'inputFix') fixLastUser(m.text);
       else if (m.type === 'toolStart') { touch(); if (!playing()) updateState('thinking'); }
       else if (m.type === 'interrupted') { stopPlayback(); finishBot('…'); s.skipping = false; }
       else if (m.type === 'turnComplete') { finishUser(); finishBot(); s.skipping = false; s.turnDone = true; touch(); }
