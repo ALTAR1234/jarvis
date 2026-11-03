@@ -99,14 +99,14 @@ function jsonSchema(schema) {
 const toolText = (r) => { try { return JSON.stringify(r ?? {}).slice(0, 50000); } catch { return String(r); } };
 
 // Full J.A.R.V.I.S. chat on Claude: same system prompt, same skills, with web search for live answers.
-async function chatClaude(messages, { system, tools, execute }) {
+async function chatClaude(messages, { system, tools, execute, voice = false }) {
   if (!process.env.ANTHROPIC_API_KEY) throw new Error('Claude is not set up yet.');
   const convo = messages.map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content }));
   const defs = [...tools.map((t) => ({ name: t.name, description: t.description, input_schema: jsonSchema(t.parameters) })), { type: 'web_search_20260209', name: 'web_search' }];
   for (let round = 0; round < 12; round++) {
     let response;
     try {
-      response = await claude().beta.messages.create({ model: CLAUDE_MODEL(), max_tokens: 16000, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default', output_config: { effort: 'medium' }, system, tools: defs, messages: convo });
+      response = await claude().beta.messages.create({ model: CLAUDE_MODEL(), max_tokens: 16000, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default', output_config: { effort: voice ? 'low' : 'medium' }, system, tools: defs, messages: convo });
     } catch (e) {
       if (e instanceof Anthropic.AuthenticationError) throw new Error('Claude rejected the API key. Check ANTHROPIC_API_KEY in the configuration file.');
       if (e instanceof Anthropic.RateLimitError) throw Object.assign(new Error('Claude is rate-limited right now. Try again in a minute.'), { status: 429 });
@@ -128,7 +128,7 @@ async function chatClaude(messages, { system, tools, execute }) {
 }
 
 // The same on ChatGPT, through OpenAI function calling.
-async function chatChatGPT(messages, { system, tools, execute }) {
+async function chatChatGPT(messages, { system, tools, execute, voice = false }) {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error('ChatGPT is not set up yet.');
   const convo = [{ role: 'system', content: system }, ...messages.map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content }))];
@@ -136,7 +136,7 @@ async function chatChatGPT(messages, { system, tools, execute }) {
   for (let round = 0; round < 12; round++) {
     let r;
     try {
-      r = await fetch('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` }, body: JSON.stringify({ model: OPENAI_MODEL(), messages: convo, tools: defs }), signal: AbortSignal.timeout(120000) });
+      r = await fetch('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` }, body: JSON.stringify({ model: OPENAI_MODEL(), messages: convo, tools: defs, reasoning_effort: voice ? 'low' : 'medium' }), signal: AbortSignal.timeout(120000) });
     } catch { throw new Error('Could not reach ChatGPT. Check the internet connection.'); }
     const j = await r.json().catch(() => ({}));
     if (r.status === 401) throw new Error('ChatGPT rejected the API key. Check OPENAI_API_KEY in the configuration file.');

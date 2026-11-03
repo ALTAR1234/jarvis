@@ -18,7 +18,9 @@ let heardFixes = [];
 const loadHeardFixes = () => fetch('/api/voicefix').then((r) => r.json()).then((d) => { heardFixes = (d.fixes || []).sort((a, b) => b.heard.length - a.heard.length); }).catch(() => {});
 loadHeardFixes(); setInterval(loadHeardFixes, 60000);
 const fixHeard = (t) => heardFixes.reduce((out, f) => out.replace(new RegExp(`(^|[^\\p{L}\\p{N}'])${f.heard.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=$|[^\\p{L}\\p{N}'])`, 'giu'), (_m, pre) => pre + f.said), String(t || ''));
-const regularAsleep = () => handsFreeEnabled && (regularSleeping || regularWakeOn && Date.now() >= regularAwakeUntil);
+// Regular voice always needs its name first (so games and videos are ignored), then follows up for 45 s.
+const REGULAR_FOLLOW_MS = 45000;
+const regularAsleep = () => handsFreeEnabled && (regularSleeping || Date.now() >= regularAwakeUntil);
 // Regular voice: stop answering until the name is heard again (Live has its own sleep).
 window.jarvisRegularSleep = () => regularSleep();
 function regularSleep() { if (!handsFreeEnabled) return; regularSleeping = true; regularAwakeUntil = 0; updateHandsFreeUI(); if (!busy) updateState('asleep'); }
@@ -127,10 +129,10 @@ async function processUtterance(blob) {
     const awake = !regularAsleep();
     if (!awake && !nameHeard(transcript)) { updateState('listening'); return; }
     regularSleeping = false;
-    if (!awake && transcript.trim().split(/\s+/).length < 2) { regularAwakeUntil = Date.now() + regularSleepMs; updateHandsFreeUI(); updateState('listening'); return; }
+    if (!awake && transcript.trim().split(/\s+/).length < 2) { regularAwakeUntil = Date.now() + REGULAR_FOLLOW_MS; updateHandsFreeUI(); updateState('listening'); return; }
     if (handsFreeEnabled && transcript) {
       const goodnight = isSleepCommand(transcript);
-      await sendMessage(transcript, { voice: true }); regularAwakeUntil = Date.now() + regularSleepMs;
+      await sendMessage(transcript, { voice: true }); regularAwakeUntil = Date.now() + REGULAR_FOLLOW_MS;
       if (goodnight) regularSleep(); else updateHandsFreeUI();
     }
   } catch (err) {
@@ -510,7 +512,7 @@ const live = (() => {
 })();
 let alwaysListening = true;
 // Regular voice drifts back to sleep once the conversation has been quiet for a while.
-setInterval(() => { if (handsFreeEnabled && regularWakeOn && regularAwakeUntil && Date.now() >= regularAwakeUntil) { regularAwakeUntil = 0; updateHandsFreeUI(); if (!busy && !recorder) updateState('listening'); } }, 5000);
+setInterval(() => { if (handsFreeEnabled && regularAwakeUntil && Date.now() >= regularAwakeUntil) { regularAwakeUntil = 0; updateHandsFreeUI(); if (!busy && !recorder) updateState('listening'); } }, 5000);
 mic.addEventListener('click', async () => {
   if (!live.on && !handsFreeEnabled) liveSupported = await fetch('/api/status').then((r) => r.json()).then((st) => Boolean(st.live)).catch(() => liveSupported);
   if (!liveSupported) { if (handsFreeEnabled) disableHandsFree(); else enableHandsFree(); return; }

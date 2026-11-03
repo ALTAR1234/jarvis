@@ -6,6 +6,8 @@ const voicefix = require('./voicefix');
 
 const URL_BASE = 'wss://api.openai.com/v1/realtime';
 const MAX_HISTORY = 20;
+// Without Jarvis's name, speech only counts as a follow-up for this long after a reply.
+const FOLLOW_UP_MS = 30000;
 
 // The renderer streams 16 kHz PCM; Realtime only takes 24 kHz.
 function to24k(b64) {
@@ -33,7 +35,7 @@ function openaiLive({ history, timeZone }, { toClient, systemPrompt, tools, onCl
   if (!key) { onClosed('ChatGPT is not set up yet. Add OPENAI_API_KEY to the configuration file, then restart.'); return null; }
   const model = process.env.OPENAI_LIVE_MODEL || 'gpt-realtime';
   if (!/^[A-Za-z0-9._-]+$/.test(model)) { onClosed('OPENAI_LIVE_MODEL contains invalid characters.'); return null; }
-  let ready = false, closed = false, calls = [], speaking = false;
+  let ready = false, closed = false, calls = [], speaking = false, responding = false, lastReplyAt = 0;
   const ws = new WebSocket(`${process.env.OPENAI_REALTIME_URL || URL_BASE}?model=${encodeURIComponent(model)}`, { headers: { Authorization: `Bearer ${key}` } });
   const send = (msg) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg)); };
   const end = (text) => { if (closed) return; closed = true; onClosed(text); try { ws.close(); } catch {} };
@@ -48,8 +50,9 @@ function openaiLive({ history, timeZone }, { toClient, systemPrompt, tools, onCl
     audio: {
       input: {
         format: { type: 'audio/pcm', rate: 24000 },
-        // Waits through mid-sentence pauses before answering.
-        turn_detection: { type: 'server_vad', threshold: 0.5, prefix_padding_ms: 300, silence_duration_ms: 900, create_response: true, interrupt_response: true },
+        // Waits through mid-sentence pauses. Replies are started here, only for speech meant for Jarvis,
+        // so games, videos and other people in the room are ignored.
+        turn_detection: { type: 'server_vad', threshold: 0.55, prefix_padding_ms: 300, silence_duration_ms: 900, create_response: false, interrupt_response: false },
         transcription: { model: process.env.OPENAI_ASR_MODEL || 'gpt-4o-mini-transcribe', language: 'en', prompt: `Someone talking to their voice assistant, Jarvis. ${voicefix.hint()}`.slice(0, 900) }
       },
       output: { format: { type: 'audio/pcm', rate: 24000 }, voice: process.env.OPENAI_LIVE_VOICE || 'cedar' }
@@ -66,11 +69,24 @@ function openaiLive({ history, timeZone }, { toClient, systemPrompt, tools, onCl
       case 'session.updated': if (!ready) { ready = true; toClient({ type: 'ready', resumed: false }); } break;
       case 'response.output_audio.delta': case 'response.audio.delta': if (ev.delta) { speaking = true; toClient({ type: 'audio', data: ev.delta }); } break;
       case 'response.output_audio_transcript.delta': case 'response.audio_transcript.delta': if (ev.delta) toClient({ type: 'output', text: ev.delta }); break;
-      case 'conversation.item.input_audio_transcription.completed': if (ev.transcript?.trim()) toClient({ type: 'input', text: voicefix.apply(ev.transcript.trim()) }); break;
-      case 'input_audio_buffer.speech_started': if (speaking) { speaking = false; toClient({ type: 'interrupted' }); } break;
+      case 'conversation.item.input_audio_transcription.completed': {
+        const text = voicefix.apply(String(ev.transcript || '').trim());
+        const forJarvis = text && (voicefix.addressed(text) || responding || Date.now() - lastReplyAt < FOLLOW_UP_MS);
+        if (!forJarvis) {
+          // not meant for Jarvis: drop it so it never builds up in the conversation
+          if (ev.item_id) send({ type: 'conversation.item.delete', item_id: ev.item_id });
+          toClient({ type: 'turnComplete' });
+          break;
+        }
+        toClient({ type: 'input', text });
+        if (responding) { send({ type: 'response.cancel' }); speaking = false; toClient({ type: 'interrupted' }); }
+        send({ type: 'response.create' });
+        break;
+      }
+      case 'response.created': responding = true; break;
       case 'response.function_call_arguments.done': calls.push({ id: ev.call_id, name: ev.name, args: ev.arguments }); break;
       case 'response.done': {
-        speaking = false;
+        speaking = false; responding = false; lastReplyAt = Date.now();
         const status = ev.response?.status, err = ev.response?.status_details?.error;
         if (status === 'failed' && err) { if (/quota|rate|insufficient|invalid_api_key/i.test(`${err.code} ${err.message}`)) return end(reason(0, `${err.code} ${err.message}`)); }
         const batch = calls; calls = [];

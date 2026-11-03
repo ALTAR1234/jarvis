@@ -130,7 +130,7 @@ async function withBackup(kind, backup, gemini, other) {
 }
 async function createReply(messages, opts) {
   return withBackup('chat', backupBrain(), () => createGeminiReply(messages, opts), async (b) => ({
-    value: await (b === 'claude' ? brains.chatClaude : brains.chatChatGPT)(messages, { system: contextPrompt(opts.voice, opts.timeZone), tools: tools.declarations(), execute: tools.execute }),
+    value: await (b === 'claude' ? brains.chatClaude : brains.chatChatGPT)(messages, { system: contextPrompt(opts.voice, opts.timeZone), tools: tools.declarations(), execute: tools.execute, voice: opts.voice }),
     via: b === 'claude' ? 'Claude' : 'ChatGPT'
   }));
 }

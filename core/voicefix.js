@@ -52,3 +52,11 @@ function hint() {
 }
 
 module.exports = { init, state, addWord, removeWord, addFix, removeFix, apply, hint };
+
+// Was this said to J.A.R.V.I.S.? Its name, the usual mishearings of it, or a correction that turns into it.
+const NAMES = ['jarvis', "jarvis's", 'jervis', 'javis', 'jarvas', 'jarves', 'jarbis', 'jarvi', 'jarvy', 'harvis', 'garvis', 'charvis', 'jueves', 'jervais'];
+function addressed(text) {
+  const names = [...NAMES, ...data.fixes.filter((f) => /jarvis/i.test(f.said)).map((f) => f.heard.toLowerCase()), ...(process.env.WAKE_WORD ? [process.env.WAKE_WORD.toLowerCase()] : [])];
+  return new RegExp(`(^|[^\\p{L}\\p{N}'])(${names.map(escape).join('|')})(?=$|[^\\p{L}\\p{N}'])`, 'iu').test(String(text || ''));
+}
+module.exports.addressed = addressed;
