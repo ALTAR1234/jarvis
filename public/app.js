@@ -396,6 +396,7 @@ const live = (() => {
       else if (m.type === 'interrupted') { stopPlayback(); finishBot('…'); s.skipping = false; }
       else if (m.type === 'turnComplete') { finishUser(); finishBot(); s.skipping = false; s.turnDone = true; touch(); }
       else if (m.type === 'handle') s.handle = m.handle;
+      else if (m.type === 'notice') showToast(m.text);
       else if (m.type === 'error' || m.type === 'closed' && m.reason) failed = m.message || m.reason;
     };
     ws.onclose = () => {

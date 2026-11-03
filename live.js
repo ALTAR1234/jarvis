@@ -4,10 +4,14 @@
 //   out: {type:'ready', resumed} | {type:'audio', data} | {type:'input'|'output', text} | {type:'turnComplete'}
 //        {type:'interrupted'} | {type:'handle', handle} | {type:'goAway'} | {type:'error', message} | {type:'closed', reason}
 const { WebSocketServer, WebSocket } = require('ws');
+const { openaiLive } = require('./core/live-openai');
 
 const LIVE_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
 const MAX_FRAME = 512 * 1024;
 const MAX_HISTORY = 20;
+// After Gemini Live runs out, ChatGPT handles live voice for a while before Gemini gets another try.
+let geminiRestUntil = 0;
+const SWITCH_NOTICE = 'Gemini Live reached its limit, so ChatGPT is handling live voice for now.';
 
 
 function closeReason(code, reason) {
@@ -18,22 +22,32 @@ function closeReason(code, reason) {
   return text ? `Gemini Live closed the session: ${text.slice(0, 160)}` : 'Gemini Live closed the session.';
 }
 
-function attachLive(server, { systemPrompt, tools, voice, trusted }) {
+function attachLive(server, { systemPrompt, tools, voice, trusted, engine = () => 'gemini' }) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME });
   server.on('upgrade', (req, socket, head) => {
     if (new URL(req.url, 'http://localhost').pathname !== '/api/live' || !req.headers.origin || !trusted(req)) { socket.destroy(); return; }
-    wss.handleUpgrade(req, socket, head, (client) => bridge(client, { systemPrompt, tools, voice }));
+    wss.handleUpgrade(req, socket, head, (client) => bridge(client, { systemPrompt, tools, voice, engine }));
   });
   return wss;
 }
 
-function bridge(client, { systemPrompt, tools, voice }) {
-  let upstream = null, ready = false;
+function bridge(client, { systemPrompt, tools, voice, engine }) {
+  let upstream = null, ready = false, chatgpt = null, started = null;
   const toClient = (msg) => { if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify(msg)); };
   const toUpstream = (msg) => { if (ready && upstream?.readyState === WebSocket.OPEN) upstream.send(JSON.stringify(msg)); };
   const fail = (message) => { toClient({ type: 'error', message }); client.close(); };
 
-  function start({ handle, history, timeZone }) {
+  function startChatGPT(notice) {
+    upstream = null; ready = false;
+    chatgpt = openaiLive(started, { toClient, systemPrompt, tools, onClosed: (why) => { toClient({ type: 'closed', reason: why }); client.close(); } });
+    if (chatgpt && notice) toClient({ type: 'notice', text: notice });
+  }
+  function start(msg) {
+    started = msg;
+    const backup = Boolean(process.env.OPENAI_API_KEY);
+    if (engine() === 'chatgpt' && backup) return startChatGPT();
+    if (backup && Date.now() < geminiRestUntil) return startChatGPT(SWITCH_NOTICE);
+    const { handle, history, timeZone } = msg;
     const key = process.env.GEMINI_API_KEY;
     if (!key) return fail('Gemini setup is incomplete. Add GEMINI_API_KEY to the app .env file, then restart.');
     const model = process.env.LIVE_MODEL || 'gemini-3.8-live';
@@ -42,7 +56,7 @@ function bridge(client, { systemPrompt, tools, voice }) {
     const search = !/^(0|false|off|no)$/i.test(process.env.GEMINI_SEARCH || 'on');
     const resuming = typeof handle === 'string' && /^[\w-]{1,512}$/.test(handle);
 
-    upstream = new WebSocket(`${LIVE_URL}?key=${encodeURIComponent(key)}`);
+    upstream = new WebSocket(`${process.env.GEMINI_LIVE_URL || LIVE_URL}?key=${encodeURIComponent(key)}`);
     upstream.on('open', () => upstream.send(JSON.stringify({ setup: {
       model: `models/${model}`,
       generationConfig: { responseModalities: ['AUDIO'], speechConfig: { languageCode: 'en-GB', voiceConfig: { prebuiltVoiceConfig: { voiceName } } } },
@@ -79,8 +93,12 @@ function bridge(client, { systemPrompt, tools, voice }) {
       if (msg.toolCall?.functionCalls?.length) runTools(msg.toolCall.functionCalls);
       if (msg.toolCallCancellation?.ids) tools.cancel?.(msg.toolCallCancellation.ids);
     });
+    const gemini = upstream;
     upstream.on('close', (code, reason) => {
-      toClient({ type: 'closed', reason: code === 1000 && !String(reason) ? '' : closeReason(code, reason) });
+      if (upstream !== gemini) return;
+      const why = code === 1000 && !String(reason) ? '' : closeReason(code, reason);
+      if (/quota/i.test(why) && process.env.OPENAI_API_KEY && client.readyState === WebSocket.OPEN) { geminiRestUntil = Date.now() + 15 * 60000; return startChatGPT(SWITCH_NOTICE); }
+      toClient({ type: 'closed', reason: why });
       client.close();
     });
     upstream.on('error', () => fail('Could not reach Gemini Live. Check your internet connection and try again.'));
@@ -95,12 +113,17 @@ function bridge(client, { systemPrompt, tools, voice }) {
 
   client.on('message', (raw) => {
     let msg; try { msg = JSON.parse(raw.toString('utf8')); } catch { return; }
-    if (msg.type === 'start' && !upstream) start(msg);
+    if (msg.type === 'start' && !upstream && !chatgpt) start(msg);
+    else if (chatgpt) {
+      if (msg.type === 'audio' && typeof msg.data === 'string') chatgpt.audio(msg.data);
+      else if (msg.type === 'audioEnd') chatgpt.audioEnd();
+      else if (msg.type === 'text' && typeof msg.text === 'string' && msg.text.trim()) chatgpt.text(msg.text.trim().slice(0, 6000));
+    }
     else if (msg.type === 'audio' && typeof msg.data === 'string') toUpstream({ realtimeInput: { audio: { data: msg.data, mimeType: 'audio/pcm;rate=16000' } } });
     else if (msg.type === 'audioEnd') toUpstream({ realtimeInput: { audioStreamEnd: true } });
     else if (msg.type === 'text' && typeof msg.text === 'string' && msg.text.trim()) toUpstream({ realtimeInput: { text: msg.text.trim().slice(0, 6000) } });
   });
-  client.on('close', () => { if (upstream && upstream.readyState <= WebSocket.OPEN) upstream.close(); });
+  client.on('close', () => { if (upstream && upstream.readyState <= WebSocket.OPEN) upstream.close(); chatgpt?.close(); });
 }
 
 module.exports = { attachLive };
