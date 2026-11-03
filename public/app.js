@@ -4,8 +4,19 @@ const mic = $('micButton'), voiceToggle = $('voiceToggle'), messages = [];
 let busy = false, voiceOn = false, voiceConfigured = false, voiceProvider = 'Gemini', wakeWord = '';
 let handsFreeEnabled = false, liveSupported = false;
 // Regular voice works like Live: it waits for its name, then follows the conversation until it has been quiet a while.
-let regularAwakeUntil = 0, regularSleepMs = 120000, regularWakeOn = true, utteranceStartedAt = 0;
-const nameHeard = (t) => new RegExp(`\b(${(wakeWord || 'jarvis').replace(/[^a-z0-9 ]/gi, '')}|jarvis)\b`, 'i').test(t);
+let regularAwakeUntil = 0, regularSleepMs = 120000, regularWakeOn = true, regularSleeping = false;
+// "Jarvis" and the ways speech recognition mishears it, especially when spoken quietly ("jueves" is Spanish for Thursday).
+const WAKE_NAMES = "jarvis|jarvis's|jervis|javis|jarvas|jarves|jarbis|jarvi|jarvy|harvis|garvis|charvis|jueves|jervais|jervis's";
+const WAKE_RE = new RegExp(`\\b(${WAKE_NAMES})\\b`, 'i');
+const nameHeard = (t) => WAKE_RE.test(t) || Boolean(wakeWord) && new RegExp(`\\b${wakeWord.replace(/[^a-z0-9 ]/gi, '')}\\b`, 'i').test(t);
+// "Jarvis, go to sleep" (but not "I'm going to sleep").
+const SLEEP_CMD = new RegExp(`(^|\\b(${WAKE_NAMES})\\b[\\s,!.]*|\\b(please|ok(ay)?|now|hey)\\b[\\s,]*)(go to sleep|go to bed|go on standby|go offline|sleep now)\\b|\\b(sleep mode|standby mode|stop listening)\\b`, 'i');
+const SELF_SLEEP = /\b(i'?m|i am|i will|i'?ll|i want to|we'?re|i)\s+(going to |gonna |about to )?(go to sleep|go to bed)\b/i;
+const isSleepCommand = (t) => SLEEP_CMD.test(t.trim()) && !SELF_SLEEP.test(t);
+const regularAsleep = () => handsFreeEnabled && (regularSleeping || regularWakeOn && Date.now() >= regularAwakeUntil);
+// Regular voice: stop answering until the name is heard again (Live has its own sleep).
+window.jarvisRegularSleep = () => regularSleep();
+function regularSleep() { if (!handsFreeEnabled) return; regularSleeping = true; regularAwakeUntil = 0; updateHandsFreeUI(); if (!busy) updateState('asleep'); }
 const avatar = window.JarvisAvatar ? new window.JarvisAvatar($('avatar')) : null;
 const micActive = () => handsFreeEnabled || live.on;
 let micStream = null, audioContext = null, analyser = null, sourceNode = null, vadFrame = 0;
@@ -13,7 +24,7 @@ let recorder = null, recordingChunks = [], recordingTimer = null, lastSpeechAt =
 let currentAudio = null, currentAudioUrl = null, toastTimer;
 
 function updateState(next) {
-  if ((live.asleep || handsFreeEnabled && regularWakeOn && Date.now() >= regularAwakeUntil) && ['idle', 'listening'].includes(next)) next = 'asleep';
+  if ((live.asleep || regularAsleep()) && ['idle', 'listening'].includes(next)) next = 'asleep';
   if (next === 'idle' && micActive()) next = 'listening';
   document.body.dataset.state = next; avatar?.setState(next);
   const labels = { idle: ['STANDBY', 'READY'], listening: ['LISTENING', 'LISTENING'], thinking: ['PROCESSING', 'THINKING'], speaking: ['SPEAKING', 'SPEAKING'], error: ['ATTENTION', 'ERROR'], asleep: ['SAY "JARVIS"', 'ASLEEP'] };
@@ -36,7 +47,7 @@ function updateHandsFreeUI() {
   }
   mic.classList.toggle('active', handsFreeEnabled); mic.setAttribute('aria-pressed', String(handsFreeEnabled));
   mic.setAttribute('aria-label', handsFreeEnabled ? 'Turn off hands-free listening' : 'Turn on hands-free listening');
-  const awake = !regularWakeOn || Date.now() < regularAwakeUntil;
+  const awake = !regularAsleep();
   $('voiceNote').textContent = !handsFreeEnabled ? 'Click the mic for regular voice. Say “Jarvis, …” to talk to me; I reply after you finish speaking.'
     : awake ? 'Listening · I reply after you finish speaking. Click the mic to stop, Esc to interrupt.'
     : 'Asleep · say “Jarvis, …” to talk to me. Background noise and other voices are ignored.';
@@ -108,10 +119,15 @@ async function processUtterance(blob) {
   updateState('thinking');
   try {
     const transcript = await transcribe(blob);
-    const awake = !regularWakeOn || Date.now() < regularAwakeUntil;
+    const awake = !regularAsleep();
     if (!awake && !nameHeard(transcript)) { updateState('listening'); return; }
-    if (!awake && transcript.trim().split(/s+/).length < 2) { regularAwakeUntil = Date.now() + regularSleepMs; updateHandsFreeUI(); updateState('listening'); return; }
-    if (handsFreeEnabled && transcript) { await sendMessage(transcript, { voice: true }); regularAwakeUntil = Date.now() + regularSleepMs; updateHandsFreeUI(); }
+    regularSleeping = false;
+    if (!awake && transcript.trim().split(/\s+/).length < 2) { regularAwakeUntil = Date.now() + regularSleepMs; updateHandsFreeUI(); updateState('listening'); return; }
+    if (handsFreeEnabled && transcript) {
+      const goodnight = isSleepCommand(transcript);
+      await sendMessage(transcript, { voice: true }); regularAwakeUntil = Date.now() + regularSleepMs;
+      if (goodnight) regularSleep(); else updateHandsFreeUI();
+    }
   } catch (err) {
     // Background noise that contained no words is not worth an error bubble.
     if (/No speech was detected/.test(err.message)) { if (handsFreeEnabled) updateState('listening'); return; }
@@ -206,7 +222,7 @@ async function speak(text) {
 // sleeps (connection closed, mic stays local) and wakes when it hears "Jarvis", Ctrl+Space, or Ctrl+Shift+J.
 const live = (() => {
   const IN_RATE = 16000, OUT_RATE = 24000, PREROLL = 13, HANGOVER = 35, WAKE_HANGOVER = 15, WAKE_MAX = 150;
-  const WAKE = /\b(jarvis|jarvis's|jervis|javis|jarvas)\b/i;
+  const WAKE = WAKE_RE;
   const s = {
     on: false, ready: false, ws: null, handle: null, attempts: 0, stopping: false,
     stream: null, inCtx: null, outCtx: null, worklet: null, inAnalyser: null, outAnalyser: null, gain: null,
@@ -330,9 +346,6 @@ const live = (() => {
 
   function remember(role, content) { content = content.trim(); if (!content) return; messages.push({ role, content }); while (messages.length > 20) messages.shift(); }
   // "Jarvis, go to sleep" (but not "I'm going to sleep"): let the goodnight reply finish, then sleep.
-  const SLEEP_CMD = /(^|\bjarvis\b[\s,!.]*|\b(please|ok(ay)?|now|hey)\b[\s,]*)(go to sleep|go to bed|go on standby|go offline)\b|\b(sleep mode|standby mode|stop listening)\b/i;
-  const SELF_SLEEP = /\b(i'?m|i am|i will|i'?ll|i want to|we'?re|i)\s+(going to |gonna |about to )?(go to sleep|go to bed)\b/i;
-  const isSleepCommand = (t) => SLEEP_CMD.test(t.trim()) && !SELF_SLEEP.test(t);
   function finishUser() { if (s.userEl) { const said = s.userText; remember('user', said); s.userEl = null; s.userText = ''; window.onUserSpeech?.(''); if (isSleepCommand(said)) sleepAfterReply(); } }
   function sleepAfterReply() {
     if (!s.on || s.asleep || s.sleepPending) return;

@@ -108,7 +108,7 @@
       else if (ev.type === 'memory') loadMemory();
       else if (ev.type === 'reminders') loadReminders();
       else if (ev.type === 'reminder') reminderDue(ev);
-      else if (ev.type === 'sleep') live.sleepAfterReply();
+      else if (ev.type === 'sleep') { if (live.on) live.sleepAfterReply(); else window.jarvisRegularSleep?.(); }
       else if (ev.type === 'appdock') window.jarvisAppPanel?.[ev.action]?.(ev);
       else if (ev.type === 'launcher') window.jarvisLauncher?.[ev.action]?.();
       else if (ev.type === 'browser') window.jarvisBrowser?.[ev.action]?.();
