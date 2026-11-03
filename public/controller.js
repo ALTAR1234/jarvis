@@ -15,7 +15,7 @@
     $('#brains').innerHTML = B.map(([k, l, i, s]) => `<button class="tile${state.brain === k ? ' on' : ''}" data-brain="${k}" ${ready(k) ? '' : 'disabled title="Add the API key first"'}><span>${i}</span>${l}<small>${ready(k) ? s : 'needs a key'}</small></button>`).join('');
     $$('[data-brain]').forEach((b) => (b.onclick = async () => { await post('/api/preferences', { brain: b.dataset.brain }); toast(`Using ${b.textContent.trim().split(/\s{2,}/)[0]}`); load(); }));
     const prefs = await get('/api/preferences');
-    $('[data-live]').forEach((b) => b.classList.toggle('on', String(prefs.liveVoice !== false) === b.dataset.live));
+    $$('[data-live]').forEach((b) => b.classList.toggle('on', String(prefs.liveVoice !== false) === b.dataset.live));
     const lk = await get('/api/locker');
     $('#pinstate').textContent = lk.hasPin ? 'set' : 'not set';
     $('#lockstart').textContent = lk.lockOnStart ? 'On' : 'Off';
@@ -29,7 +29,7 @@
   $$('[data-m]').forEach((b) => (b.onclick = () => post('/api/controller/media', { action: b.dataset.m }).catch((e) => toast(e.message))));
   $$('[data-set]').forEach((b) => (b.onclick = () => post('/api/controller/settings', { page: b.dataset.set }).catch((e) => toast(e.message))));
   $('#dnd').onclick = async () => { await post('/api/preferences', { dnd: !state.dnd }); load(); };
-  $('[data-live]').forEach((b) => (b.onclick = async () => { await post('/api/preferences', { liveVoice: b.dataset.live === 'true' }); toast(b.dataset.live === 'true' ? 'Live voice on' : 'Regular voice on'); load(); }));
+  $$('[data-live]').forEach((b) => (b.onclick = async () => { await post('/api/preferences', { liveVoice: b.dataset.live === 'true' }); toast(b.dataset.live === 'true' ? 'Live voice on' : 'Regular voice on'); load(); }));
   $('#lock').onclick = () => post('/api/locker/lock');
   $$('[data-focus]').forEach((b) => (b.onclick = async () => { const r = await post('/api/controller/focus', { mode: b.dataset.focus }).catch((e) => toast(e.message)); if (r) toast(`${b.dataset.focus[0].toUpperCase() + b.dataset.focus.slice(1)} mode`); load(); }));
   $('#savepin').onclick = async () => {
