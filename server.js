@@ -112,6 +112,35 @@ async function geminiGenerate(model, body, timeoutMs) {
     method: 'POST', headers: { 'x-goog-api-key': process.env.GEMINI_API_KEY, 'content-type': 'application/json' }, body: JSON.stringify(body)
   }, timeoutMs);
 }
+// When Gemini runs out of quota, Claude or ChatGPT (whichever has a key) takes over; Gemini gets
+// another try after a rest. Chat and voice rest separately, since Google limits each model on its own.
+const geminiRest = { chat: 0, voice: 0 };
+const isLimit = (err) => err?.status === 429 || /quota|rate.?limit|exhausted/i.test(err?.message || '');
+const backupBrain = () => { const have = brains.available(); return have.claude ? 'claude' : have.chatgpt ? 'chatgpt' : null; };
+const backupVoice = () => (process.env.OPENAI_API_KEY ? 'openai' : process.env.FISH_API_KEY ? 'fish' : null);
+const resting = (kind) => Date.now() < geminiRest[kind];
+const rest = (kind) => { geminiRest[kind] = Date.now() + 15 * 60000; console.warn(`Gemini ${kind} limit reached; using a backup for 15 minutes.`); };
+async function withBackup(kind, backup, gemini, other) {
+  if (!(backup && resting(kind))) {
+    try { return { value: await gemini(), via: 'Gemini' }; }
+    catch (err) { if (!backup || !isLimit(err)) throw err; rest(kind); }
+  }
+  return other(backup);
+}
+async function createReply(messages, opts) {
+  return withBackup('chat', backupBrain(), () => createGeminiReply(messages, opts), async (b) => ({
+    value: await (b === 'claude' ? brains.chatClaude : brains.chatChatGPT)(messages, { system: contextPrompt(opts.voice, opts.timeZone), tools: tools.declarations(), execute: tools.execute }),
+    via: b === 'claude' ? 'Claude' : 'ChatGPT'
+  }));
+}
+async function transcribeSpeech(audio, type) {
+  if (voiceProvider() === 'fish') return { value: await transcribeWithFish(audio, type), via: 'Fish Audio' };
+  return withBackup('voice', backupVoice(), () => transcribeWithGemini(audio, type), async (b) => (b === 'openai' ? { value: await brains.transcribeOpenAI(audio, type), via: 'OpenAI' } : { value: await transcribeWithFish(audio, type), via: 'Fish Audio' }));
+}
+async function synthesizeSpeech(text) {
+  if (voiceProvider() === 'fish') return { value: await synthesizeWithFish(text), via: 'Fish Audio' };
+  return withBackup('voice', backupVoice(), () => synthesizeWithGemini(text), async (b) => (b === 'openai' ? { value: await brains.speakOpenAI(text), via: 'OpenAI' } : { value: await synthesizeWithFish(text), via: 'Fish Audio' }));
+}
 async function createGeminiReply(messages, { voice = false, timeZone } = {}) {
   const key = process.env.GEMINI_API_KEY;
   const model = process.env.GEMINI_MODEL;
@@ -194,7 +223,7 @@ async function askGemini(parts, json = false, which = readPreferences().brain) {
   if (which === 'claude' && have.claude) return brains.askClaude(parts, { json });
   if (which === 'chatgpt' && have.chatgpt) return brains.askChatGPT(parts, { json });
   if (which === 'big') return bigBrain(parts, json);
-  return askOnlyGemini(parts, json);
+  return (await withBackup('chat', backupBrain(), () => askOnlyGemini(parts, json), async (b) => ({ value: await (b === 'claude' ? brains.askClaude : brains.askChatGPT)(parts, { json }) }))).value;
 }
 // Big Brain: every brain that's set up answers at once, then the strongest one merges the answers
 // into a single reply (or, for JSON, returns the best-formed result).
@@ -660,7 +689,7 @@ function createServer() {
       return;
     }
     if (req.method === 'POST' && url.pathname === '/api/chat') {
-      try { const body = await readJson(req); send(res, 200, { reply: await createGeminiReply(validateMessages(body.messages), { voice: body.voice === true, timeZone: body.timeZone }) }); }
+      try { const body = await readJson(req); const r = await createReply(validateMessages(body.messages), { voice: body.voice === true, timeZone: body.timeZone }); send(res, 200, { reply: r.value, via: r.via }); }
       catch (err) { send(res, err.status || 400, { error: err.message || 'Something went wrong. Try again.' }); }
       return;
     }
@@ -842,12 +871,12 @@ function createServer() {
       return;
     }
     if (req.method === 'POST' && url.pathname === '/api/voice/asr') {
-      try { const audio = await readBytes(req); const type = req.headers['content-type'] || ''; send(res, 200, { text: voiceProvider() === 'fish' ? await transcribeWithFish(audio, type) : await transcribeWithGemini(audio, type) }); }
+      try { const audio = await readBytes(req); const type = req.headers['content-type'] || ''; const r = await transcribeSpeech(audio, type); send(res, 200, { text: r.value, via: r.via }); }
       catch (err) { send(res, err.status || 400, { error: err.message || 'Voice transcription failed.' }); }
       return;
     }
     if (req.method === 'POST' && url.pathname === '/api/voice/tts') {
-      try { const body = await readJson(req); const { audio, type } = voiceProvider() === 'fish' ? await synthesizeWithFish(body.text) : await synthesizeWithGemini(body.text); res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store', 'content-length': audio.length }); res.end(audio); }
+      try { const body = await readJson(req); const r = await synthesizeSpeech(body.text); const { audio, type } = r.value; res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store', 'content-length': audio.length, 'x-jarvis-via': r.via }); res.end(audio); }
       catch (err) { send(res, err.status || 400, { error: err.message || 'Spoken reply failed.' }); }
       return;
     }

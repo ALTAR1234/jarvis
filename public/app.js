@@ -57,6 +57,14 @@ Promise.all([fetch('/api/status').then((r) => r.json()), fetch('/api/preferences
   else if (prefs.handsFree && voiceConfigured) enableHandsFree();
 }).catch(() => showToast('Could not read assistant setup. Restart the app and try again.'));
 
+// Says once when a backup takes over from Gemini (chat and voice switch separately), and when Gemini is back.
+const usingNow = { chat: 'Gemini', voice: 'Gemini' };
+function noteVia(kind, via) {
+  if (!via || via === usingNow[kind]) return;
+  const what = kind === 'chat' ? 'answering' : 'handling voice';
+  showToast(via === 'Gemini' ? `Gemini is back and ${what} again.` : usingNow[kind] === 'Gemini' ? `Gemini reached its limit, so ${via} is ${what} for now.` : `${via} is ${what} now.`);
+  usingNow[kind] = via;
+}
 async function sendMessage(text, { voice = false } = {}) {
   const content = text.trim(); if (!content || busy) return;
   addMessage('user', content); messages.push({ role: 'user', content });
@@ -67,6 +75,7 @@ async function sendMessage(text, { voice = false } = {}) {
     const response = await fetch('/api/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ messages, voice, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }) });
     const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error || `Request failed (${response.status}).`);
     if (typeof data.reply !== 'string' || !data.reply.trim()) throw new Error('Gemini returned an empty reply. Try again.');
+    noteVia('chat', data.via);
     pending.textContent = data.reply; pending.classList.remove('pending'); messages.push({ role: 'assistant', content: data.reply });
     if (voiceOn) await speak(data.reply); else updateState('idle');
   } catch (err) { pending.remove(); addMessage('assistant', err.message || 'Could not reach Gemini. Check the setup and try again.', 'error'); messages.pop(); updateState('error'); setTimeout(() => updateState('idle'), 2000); }
@@ -91,7 +100,7 @@ function setVoiceReplies(enabled) {
 async function transcribe(blob) {
   const response = await fetch('/api/voice/asr', { method: 'POST', headers: { 'content-type': blob.type }, body: blob });
   const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error || 'Could not transcribe that recording.');
-  return data.text;
+  noteVia('voice', data.via); return data.text;
 }
 async function processUtterance(blob) {
   if (!blob.size || !handsFreeEnabled) return;
@@ -170,7 +179,7 @@ async function speak(text) {
   try {
     const response = await fetch('/api/voice/tts', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
     if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.error || 'Could not create the spoken reply.'); }
-    const audioBlob = await response.blob(); if (currentAudio) currentAudio.pause(); if (currentAudioUrl) URL.revokeObjectURL(currentAudioUrl);
+    noteVia('voice', response.headers.get('x-jarvis-via')); const audioBlob = await response.blob(); if (currentAudio) currentAudio.pause(); if (currentAudioUrl) URL.revokeObjectURL(currentAudioUrl);
     currentAudioUrl = URL.createObjectURL(audioBlob); currentAudio = new Audio(currentAudioUrl);
     currentAudio.onplay = () => updateState('speaking'); currentAudio.onended = () => updateState('idle'); currentAudio.onerror = () => { updateState('error'); showToast('The spoken reply could not be played.'); setTimeout(() => updateState('idle'), 1800); };
     await currentAudio.play();

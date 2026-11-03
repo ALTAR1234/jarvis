@@ -82,4 +82,97 @@ async function askChatGPT(parts, { json = false, system } = {}) {
   return json ? parseJson(text) : text || 'ChatGPT had nothing to add.';
 }
 
-module.exports = { available, askClaude, askChatGPT, parseJson, CLAUDE_MODEL, OPENAI_MODEL };
+// Gemini tool schemas use upper-case types ('OBJECT', 'STRING'); Claude and OpenAI want JSON Schema.
+function jsonSchema(schema) {
+  if (!schema || typeof schema !== 'object') return schema;
+  const out = {};
+  for (const [k, v] of Object.entries(schema)) {
+    if (k === 'type' && typeof v === 'string') out.type = v.toLowerCase();
+    else if (k === 'properties') out.properties = Object.fromEntries(Object.entries(v || {}).map(([pk, pv]) => [pk, jsonSchema(pv)]));
+    else if (k === 'items') out.items = jsonSchema(v);
+    else if (k !== 'nullable') out[k] = v;
+  }
+  if (out.type === 'object' && !out.properties) out.properties = {};
+  return out;
+}
+const toolText = (r) => { try { return JSON.stringify(r ?? {}).slice(0, 50000); } catch { return String(r); } };
+
+// Full J.A.R.V.I.S. chat on Claude: same system prompt, same skills, with web search for live answers.
+async function chatClaude(messages, { system, tools, execute }) {
+  if (!process.env.ANTHROPIC_API_KEY) throw new Error('Claude is not set up yet.');
+  const convo = messages.map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content }));
+  const defs = [...tools.map((t) => ({ name: t.name, description: t.description, input_schema: jsonSchema(t.parameters) })), { type: 'web_search_20260209', name: 'web_search' }];
+  for (let round = 0; round < 12; round++) {
+    let response;
+    try {
+      response = await claude().beta.messages.create({ model: CLAUDE_MODEL(), max_tokens: 16000, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default', output_config: { effort: 'medium' }, system, tools: defs, messages: convo });
+    } catch (e) {
+      if (e instanceof Anthropic.AuthenticationError) throw new Error('Claude rejected the API key. Check ANTHROPIC_API_KEY in the configuration file.');
+      if (e instanceof Anthropic.RateLimitError) throw Object.assign(new Error('Claude is rate-limited right now. Try again in a minute.'), { status: 429 });
+      if (e instanceof Anthropic.APIError) throw new Error(`Claude returned an error (${e.status}).`);
+      throw new Error('Could not reach Claude. Check the internet connection.');
+    }
+    if (response.stop_reason === 'refusal') return 'I am afraid I cannot help with that one, sir.';
+    convo.push({ role: 'assistant', content: response.content });
+    if (response.stop_reason === 'pause_turn') continue; // a long web search: let it carry on
+    const calls = response.content.filter((b) => b.type === 'tool_use');
+    if (response.stop_reason !== 'tool_use' || !calls.length) {
+      const text = response.content.filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+      return text || 'Done, sir.';
+    }
+    const results = await Promise.all(calls.map((c) => execute(c.name, c.input || {}, { callId: c.id })));
+    convo.push({ role: 'user', content: calls.map((c, i) => ({ type: 'tool_result', tool_use_id: c.id, content: toolText(results[i]) })) });
+  }
+  throw new Error('That took too many steps. Try breaking the request into smaller parts.');
+}
+
+// The same on ChatGPT, through OpenAI function calling.
+async function chatChatGPT(messages, { system, tools, execute }) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw new Error('ChatGPT is not set up yet.');
+  const convo = [{ role: 'system', content: system }, ...messages.map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content }))];
+  const defs = tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: jsonSchema(t.parameters) } }));
+  for (let round = 0; round < 12; round++) {
+    let r;
+    try {
+      r = await fetch('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` }, body: JSON.stringify({ model: OPENAI_MODEL(), messages: convo, tools: defs }), signal: AbortSignal.timeout(120000) });
+    } catch { throw new Error('Could not reach ChatGPT. Check the internet connection.'); }
+    const j = await r.json().catch(() => ({}));
+    if (r.status === 401) throw new Error('ChatGPT rejected the API key. Check OPENAI_API_KEY in the configuration file.');
+    if (r.status === 429) throw Object.assign(new Error('ChatGPT is rate-limited or out of credit right now.'), { status: 429 });
+    if (!r.ok) throw new Error(`ChatGPT returned an error (${r.status}): ${String(j.error?.message || '').slice(0, 120)}`);
+    const msg = j.choices?.[0]?.message || {};
+    const calls = msg.tool_calls || [];
+    if (!calls.length) return String(msg.content || '').trim() || 'Done, sir.';
+    convo.push(msg);
+    const results = await Promise.all(calls.map((c) => { let args = {}; try { args = JSON.parse(c.function?.arguments || '{}'); } catch {} return execute(c.function?.name, args, { callId: c.id }); }));
+    calls.forEach((c, i) => convo.push({ role: 'tool', tool_call_id: c.id, content: toolText(results[i]) }));
+  }
+  throw new Error('That took too many steps. Try breaking the request into smaller parts.');
+}
+
+// Speech on OpenAI, for when Gemini's voice limit runs out.
+async function transcribeOpenAI(audio, contentType) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw new Error('ChatGPT is not set up yet.');
+  const type = contentType.split(';')[0];
+  const form = new FormData();
+  form.append('file', new Blob([audio], { type }), `voice.${type.split('/')[1] || 'webm'}`);
+  form.append('model', process.env.OPENAI_ASR_MODEL || 'gpt-4o-mini-transcribe');
+  const r = await fetch('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', headers: { authorization: `Bearer ${key}` }, body: form, signal: AbortSignal.timeout(60000) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw Object.assign(new Error(`OpenAI speech recognition failed (${r.status}).`), { status: r.status === 429 ? 429 : 502 });
+  const text = String(j.text || '').trim();
+  if (!text) throw Object.assign(new Error('No speech was detected. Try again, or type your message.'), { status: 422 });
+  return text;
+}
+async function speakOpenAI(text) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw new Error('ChatGPT is not set up yet.');
+  const r = await fetch('https://api.openai.com/v1/audio/speech', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` }, body: JSON.stringify({ model: process.env.OPENAI_TTS_MODEL || 'gpt-4o-mini-tts', voice: process.env.OPENAI_TTS_VOICE || 'onyx', input: text, response_format: 'mp3' }), signal: AbortSignal.timeout(90000) });
+  if (!r.ok) throw Object.assign(new Error(`OpenAI speech failed (${r.status}).`), { status: r.status === 429 ? 429 : 502 });
+  return { audio: Buffer.from(await r.arrayBuffer()), type: 'audio/mpeg' };
+}
+
+module.exports = { available, askClaude, askChatGPT, chatClaude, chatChatGPT, transcribeOpenAI, speakOpenAI, jsonSchema, parseJson, CLAUDE_MODEL, OPENAI_MODEL };
+
