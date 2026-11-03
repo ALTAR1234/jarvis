@@ -3,6 +3,9 @@ const form = $('chatForm'), input = $('messageInput'), convo = $('conversation')
 const mic = $('micButton'), voiceToggle = $('voiceToggle'), messages = [];
 let busy = false, voiceOn = false, voiceConfigured = false, voiceProvider = 'Gemini', wakeWord = '';
 let handsFreeEnabled = false, liveSupported = false;
+// Regular voice works like Live: it waits for its name, then follows the conversation until it has been quiet a while.
+let regularAwakeUntil = 0, regularSleepMs = 120000, regularWakeOn = true, utteranceStartedAt = 0;
+const nameHeard = (t) => new RegExp(`\b(${(wakeWord || 'jarvis').replace(/[^a-z0-9 ]/gi, '')}|jarvis)\b`, 'i').test(t);
 const avatar = window.JarvisAvatar ? new window.JarvisAvatar($('avatar')) : null;
 const micActive = () => handsFreeEnabled || live.on;
 let micStream = null, audioContext = null, analyser = null, sourceNode = null, vadFrame = 0;
@@ -10,7 +13,7 @@ let recorder = null, recordingChunks = [], recordingTimer = null, lastSpeechAt =
 let currentAudio = null, currentAudioUrl = null, toastTimer;
 
 function updateState(next) {
-  if (live.asleep && ['idle', 'listening'].includes(next)) next = 'asleep';
+  if ((live.asleep || handsFreeEnabled && regularWakeOn && Date.now() >= regularAwakeUntil) && ['idle', 'listening'].includes(next)) next = 'asleep';
   if (next === 'idle' && micActive()) next = 'listening';
   document.body.dataset.state = next; avatar?.setState(next);
   const labels = { idle: ['STANDBY', 'READY'], listening: ['LISTENING', 'LISTENING'], thinking: ['PROCESSING', 'THINKING'], speaking: ['SPEAKING', 'SPEAKING'], error: ['ATTENTION', 'ERROR'], asleep: ['SAY "JARVIS"', 'ASLEEP'] };
@@ -33,8 +36,10 @@ function updateHandsFreeUI() {
   }
   mic.classList.toggle('active', handsFreeEnabled); mic.setAttribute('aria-pressed', String(handsFreeEnabled));
   mic.setAttribute('aria-label', handsFreeEnabled ? 'Turn off hands-free listening' : 'Turn on hands-free listening');
-  const heard = wakeWord ? `Only phrases containing "${wakeWord}" are answered.` : 'No wake word: any speech I detect is answered.';
-  $('voiceNote').textContent = handsFreeEnabled ? `Hands-free is on. ${heard} Speech is sent to ${voiceProvider}; silence stays on this device. Click the mic to stop, Esc to interrupt.` : `Click the mic once for hands-free listening. ${heard} Speech is sent to ${voiceProvider}; silence stays on this device.`;
+  const awake = !regularWakeOn || Date.now() < regularAwakeUntil;
+  $('voiceNote').textContent = !handsFreeEnabled ? 'Click the mic for regular voice. Say “Jarvis, …” to talk to me; I reply after you finish speaking.'
+    : awake ? 'Listening · I reply after you finish speaking. Click the mic to stop, Esc to interrupt.'
+    : 'Asleep · say “Jarvis, …” to talk to me. Background noise and other voices are ignored.';
 }
 updateClock(); setInterval(updateClock, 30000);
 async function savePreferences(patch) {
@@ -47,7 +52,7 @@ Promise.all([fetch('/api/status').then((r) => r.json()), fetch('/api/preferences
   voiceOn = Boolean(prefs.voiceReplies && voiceConfigured); live.setMuted(!voiceOn);
   $('voiceLabel').textContent = voiceConfigured ? voiceOn ? 'Voice replies on' : 'Voice replies off' : 'Voice not configured';
   voiceToggle.title = voiceOn ? 'Disable spoken replies' : 'Enable spoken replies';
-  live.configure(prefs); alwaysListening = prefs.alwaysListening !== false;
+  live.configure(prefs); regularWakeOn = prefs.autoSleep !== false; if (prefs.sleepMinutes) regularSleepMs = prefs.sleepMinutes * 60000; alwaysListening = prefs.alwaysListening !== false;
   if (liveSupported && (prefs.alwaysListening !== false || prefs.handsFree)) live.start();
   else if (prefs.handsFree && voiceConfigured) enableHandsFree();
 }).catch(() => showToast('Could not read assistant setup. Restart the app and try again.'));
@@ -94,8 +99,10 @@ async function processUtterance(blob) {
   updateState('thinking');
   try {
     const transcript = await transcribe(blob);
-    if (wakeWord && !transcript.toLowerCase().includes(wakeWord)) { updateState('listening'); return; }
-    if (handsFreeEnabled && transcript) await sendMessage(transcript, { voice: true });
+    const awake = !regularWakeOn || Date.now() < regularAwakeUntil;
+    if (!awake && !nameHeard(transcript)) { updateState('listening'); return; }
+    if (!awake && transcript.trim().split(/s+/).length < 2) { regularAwakeUntil = Date.now() + regularSleepMs; updateHandsFreeUI(); updateState('listening'); return; }
+    if (handsFreeEnabled && transcript) { await sendMessage(transcript, { voice: true }); regularAwakeUntil = Date.now() + regularSleepMs; updateHandsFreeUI(); }
   } catch (err) {
     // Background noise that contained no words is not worth an error bubble.
     if (/No speech was detected/.test(err.message)) { if (handsFreeEnabled) updateState('listening'); return; }
@@ -109,8 +116,8 @@ function beginUtterance() {
   const mime = chooseMime(); recorder = mime ? new MediaRecorder(micStream, { mimeType: mime }) : new MediaRecorder(micStream);
   recordingChunks = []; recorder.ondataavailable = (event) => { if (event.data.size) recordingChunks.push(event.data); };
   recorder.onerror = () => { recorder = null; recordingChunks = []; updateState('error'); showToast('Microphone capture failed.'); setTimeout(() => updateState('listening'), 1800); };
-  recorder.onstop = () => { clearTimeout(recordingTimer); const blob = new Blob(recordingChunks, { type: mime || recordingChunks[0]?.type || 'audio/webm' }); recordingChunks = []; recorder = null; if (handsFreeEnabled) processUtterance(blob); };
-  recorder.start(); lastSpeechAt = Date.now(); updateState('listening');
+  recorder.onstop = () => { clearTimeout(recordingTimer); const tooShort = Date.now() - utteranceStartedAt < 1300; const blob = new Blob(recordingChunks, { type: mime || recordingChunks[0]?.type || 'audio/webm' }); recordingChunks = []; recorder = null; if (handsFreeEnabled && !tooShort) processUtterance(blob); };
+  recorder.start(); lastSpeechAt = utteranceStartedAt = Date.now(); updateState('listening');
   recordingTimer = setTimeout(() => { if (recorder?.state === 'recording') recorder.stop(); }, 20000);
 }
 function runVAD() {
@@ -118,12 +125,12 @@ function runVAD() {
   const samples = new Float32Array(analyser.fftSize); analyser.getFloatTimeDomainData(samples);
   let sum = 0; for (const value of samples) sum += value * value;
   const rms = Math.sqrt(sum / samples.length);
-  const threshold = Math.max(0.018, noiseFloor * 3.2);
+  const threshold = Math.max(0.026, noiseFloor * 3.6);
   if (!recorder && !busy && !(currentAudio && !currentAudio.paused)) noiseFloor = noiseFloor * 0.96 + rms * 0.04;
   if (!busy && !(currentAudio && !currentAudio.paused)) {
     if (rms > threshold) { speechFrames++; if (recorder) lastSpeechAt = Date.now(); }
     else speechFrames = 0;
-    if (!recorder && speechFrames >= 3) { speechFrames = 0; beginUtterance(); }
+    if (!recorder && speechFrames >= 8) { speechFrames = 0; beginUtterance(); }
   }
   if (recorder && Date.now() - lastSpeechAt > 950) recorder.stop();
   vadFrame = requestAnimationFrame(runVAD);
@@ -458,6 +465,8 @@ const live = (() => {
     get on() { return s.on; }, get ready() { return s.ready; }, get asleep() { return s.asleep; } };
 })();
 let alwaysListening = true;
+// Regular voice drifts back to sleep once the conversation has been quiet for a while.
+setInterval(() => { if (handsFreeEnabled && regularWakeOn && regularAwakeUntil && Date.now() >= regularAwakeUntil) { regularAwakeUntil = 0; updateHandsFreeUI(); if (!busy && !recorder) updateState('listening'); } }, 5000);
 mic.addEventListener('click', async () => {
   if (!live.on && !handsFreeEnabled) liveSupported = await fetch('/api/status').then((r) => r.json()).then((st) => Boolean(st.live)).catch(() => liveSupported);
   if (!liveSupported) { if (handsFreeEnabled) disableHandsFree(); else enableHandsFree(); return; }
