@@ -7,6 +7,7 @@ const { WebSocketServer, WebSocket } = require('ws');
 const { openaiLive } = require('./core/live-openai');
 const voicefix = require('./core/voicefix');
 const brains = require('./core/brains');
+const voiceid = require('./core/voiceid');
 
 // 16 kHz mono PCM16 pieces -> one WAV file.
 function pcmWav(parts) {
@@ -129,16 +130,25 @@ function bridge(client, { systemPrompt, tools, voice, engine }) {
     toUpstream({ toolResponse: { functionResponses } });
   }
 
+  // "Only my voice": each utterance is checked against the user's voice before the model hears it.
+  const mine = voiceid.gate(
+    (data) => {
+      if (chatgpt) return chatgpt.audio(data);
+      if (ready) heard.push(Buffer.from(data, 'base64')); if (heard.length > 1500) heard.shift();
+      toUpstream({ realtimeInput: { audio: { data, mimeType: 'audio/pcm;rate=16000' } } });
+    },
+    () => { if (chatgpt) return chatgpt.audioEnd(); toUpstream({ realtimeInput: { audioStreamEnd: true } }); betterTranscript(); },
+    () => { heard = []; toClient({ type: 'ignored' }); }
+  );
+
   client.on('message', (raw) => {
     let msg; try { msg = JSON.parse(raw.toString('utf8')); } catch { return; }
     if (msg.type === 'start' && !upstream && !chatgpt) start(msg);
+    else if (msg.type === 'audio' && typeof msg.data === 'string') mine.audio(msg.data);
+    else if (msg.type === 'audioEnd') mine.end();
     else if (chatgpt) {
-      if (msg.type === 'audio' && typeof msg.data === 'string') chatgpt.audio(msg.data);
-      else if (msg.type === 'audioEnd') chatgpt.audioEnd();
-      else if (msg.type === 'text' && typeof msg.text === 'string' && msg.text.trim()) chatgpt.text(msg.text.trim().slice(0, 6000));
+      if (msg.type === 'text' && typeof msg.text === 'string' && msg.text.trim()) chatgpt.text(msg.text.trim().slice(0, 6000));
     }
-    else if (msg.type === 'audio' && typeof msg.data === 'string') { if (ready) heard.push(Buffer.from(msg.data, 'base64')); if (heard.length > 1500) heard.shift(); toUpstream({ realtimeInput: { audio: { data: msg.data, mimeType: 'audio/pcm;rate=16000' } } }); }
-    else if (msg.type === 'audioEnd') { toUpstream({ realtimeInput: { audioStreamEnd: true } }); betterTranscript(); }
     else if (msg.type === 'text' && typeof msg.text === 'string' && msg.text.trim()) toUpstream({ realtimeInput: { text: msg.text.trim().slice(0, 6000) } });
   });
   client.on('close', () => { if (upstream && upstream.readyState <= WebSocket.OPEN) upstream.close(); chatgpt?.close(); });

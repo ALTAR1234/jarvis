@@ -52,5 +52,55 @@
   $('#vword').onkeydown = (e) => { if (e.key === 'Enter') $('#addvword').click(); };
   $('#vsaid').onkeydown = (e) => { if (e.key === 'Enter') $('#addvfix').click(); };
   loadWords().catch(() => {});
+  // Only my voice: record a few sentences at 16 kHz and send them as WAV files to build the voice fingerprint.
+  const LINES = ['Jarvis, what is the weather like today?', 'Hey Jarvis, open Spotify and play my music.', 'Remind me to finish my homework at seven tonight.', 'Jarvis, how much battery do I have left?', 'Turn the volume down a little and pause the video.', 'What time is it in Tokyo right now?'];
+  let vid = null, recording = false;
+  function showVid(d) {
+    vid = d;
+    const model = d.model === 'downloading' ? ' · downloading the voice model…' : '';
+    $('#vidstate').textContent = d.active ? `On · learned from ${d.samples} sentences${d.ignored ? ` · ignored ${d.ignored} other voices` : ''}` : d.samples >= 3 ? 'Off' : `${d.samples} of ${d.needed} sentences recorded${model}`;
+    $('#vidprompt').innerHTML = d.samples < d.needed ? `Say: <b>“${esc(LINES[d.samples % LINES.length])}”</b>` : 'All set. You can record more sentences anytime to make it more accurate.';
+    $('#viden').checked = d.enabled; $('#viden').disabled = d.samples < 3; $('#vidstrict').value = d.strictness;
+    $('#vidtest').disabled = !d.samples;
+  }
+  async function record(seconds) {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
+    const ctx = new AudioContext(); await ctx.audioWorklet.addModule('/mic-worklet.js');
+    const node = new AudioWorkletNode(ctx, 'mic-capture'), src = ctx.createMediaStreamSource(stream), blocks = [];
+    node.port.onmessage = (e) => blocks.push(e.data); src.connect(node);
+    await new Promise((r) => setTimeout(r, seconds * 1000));
+    src.disconnect(); stream.getTracks().forEach((t) => t.stop()); const rate = ctx.sampleRate; await ctx.close();
+    const total = blocks.reduce((n, b) => n + b.length, 0), step = rate / 16000, count = Math.floor(total / step);
+    const all = new Float32Array(total); let o = 0; for (const b of blocks) { all.set(b, o); o += b.length; }
+    const view = new DataView(new ArrayBuffer(44 + count * 2));
+    const text = (at, s) => { for (let i = 0; i < s.length; i++) view.setUint8(at + i, s.charCodeAt(i)); };
+    text(0, 'RIFF'); view.setUint32(4, 36 + count * 2, true); text(8, 'WAVE'); text(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+    view.setUint32(24, 16000, true); view.setUint32(28, 32000, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true); text(36, 'data'); view.setUint32(40, count * 2, true);
+    for (let i = 0; i < count; i++) view.setInt16(44 + i * 2, Math.max(-1, Math.min(1, all[Math.floor(i * step)])) * 0x7fff, true);
+    return new Blob([view.buffer], { type: 'audio/wav' });
+  }
+  const sendWav = (url, blob) => fetch(url, { method: 'POST', headers: { 'content-type': 'audio/wav' }, body: blob }).then(async (r) => { const j = await r.json(); if (!r.ok) throw new Error(j.error || 'Something went wrong.'); return j; });
+  async function capture(btn, label, url) {
+    if (recording) return; recording = true; const old = btn.textContent;
+    try {
+      btn.textContent = label; btn.disabled = true;
+      const blob = await record(5);
+      btn.textContent = vid.model === 'ready' ? 'Learning…' : 'Getting the voice model (first time only)…';
+      return await sendWav(url, blob);
+    } finally { recording = false; btn.textContent = old; btn.disabled = false; }
+  }
+  $('#vidrec').onclick = async () => {
+    try { const d = await capture($('#vidrec'), '● Recording… read the sentence', '/api/voiceid/enroll'); showVid(d); toast(d.active && d.samples === 3 ? 'Learned your voice. J.A.R.V.I.S. now only listens to you.' : 'Got it'); }
+    catch (e) { toast(e.message); get('/api/voiceid').then(showVid).catch(() => {}); }
+  };
+  $('#vidtest').onclick = async () => {
+    try { const r = await capture($('#vidtest'), '● Say anything…', '/api/voiceid/test'); toast(r.ok ? `That's you (match ${Math.round(r.score * 100)}%)` : `That didn't sound like you (match ${Math.round(r.score * 100)}%). Record a few more sentences, or pick Relaxed.`); }
+    catch (e) { toast(e.message); }
+  };
+  $('#vidreset').onclick = async () => { if (confirm('Forget your voice and start over?')) showVid(await post('/api/voiceid/reset')); };
+  $('#viden').onchange = async () => { showVid(await post('/api/voiceid/settings', { enabled: $('#viden').checked })); toast($('#viden').checked ? 'Only listening to your voice' : 'Listening to everyone'); };
+  $('#vidstrict').onchange = async () => { showVid(await post('/api/voiceid/settings', { strictness: $('#vidstrict').value })); toast('Saved'); };
+  get('/api/voiceid').then(showVid).catch((e) => toast(e.message));
+
   load().catch((e) => toast(e.message));
 })();

@@ -75,6 +75,14 @@
         <div id="vfixes"></div>
         <div class="pinrow"><input class="field" id="vheard" placeholder="It heard… (e.g. jueves)" maxlength="60"><input class="field" id="vsaid" placeholder="I said… (e.g. Jarvis)" maxlength="60"><button class="btn" id="addvfix">Add correction</button></div>
       </div>
+      <div class="card span2"><h3>Only my voice</h3>
+        <p style="color:var(--faint);font-size:12.5px;margin:0 0 10px">Teach J.A.R.V.I.S. what you sound like, so it ignores games, videos, other tabs and other people. Read each sentence out loud in your normal voice, where you usually talk to it. Your voice stays on this PC.</p>
+        <div class="opt">Status <span id="vidstate"></span></div>
+        <div id="vidprompt" style="font-size:15px;margin:10px 0;min-height:22px"></div>
+        <div class="pinrow"><button class="btn" id="vidrec">Record sentence</button><button class="btn" id="vidtest">Test my voice</button><button class="btn" id="vidreset">Start over</button></div>
+        <div class="pinrow" style="margin-top:10px"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="viden"> Only listen to my voice</label>
+          <select class="field" id="vidstrict" style="max-width:220px"><option value="relaxed">Relaxed (fewer misses)</option><option value="normal">Normal</option><option value="strict">Strict (ignores more)</option></select></div>
+      </div>
       <div class="card span2"><h3>Locker</h3>
         <div class="opt">PIN <span id="pinstate"></span></div>
         <div class="pinrow"><input class="field" id="oldpin" type="password" inputmode="numeric" placeholder="Current PIN (if you have one)"><input class="field" id="newpin" type="password" inputmode="numeric" placeholder="New PIN, 4–8 digits (blank removes it)"><button class="btn" id="savepin">Save PIN</button></div>

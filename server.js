@@ -13,6 +13,7 @@ const helper = require('./core/helper');
 const brains = require('./core/brains');
 const osapps = require('./core/osapps');
 const voicefix = require('./core/voicefix');
+const voiceid = require('./core/voiceid');
 
 const ROOT = __dirname;
 const PUBLIC = path.join(ROOT, 'public');
@@ -390,6 +391,7 @@ function initAssistant() {
   if (initialised) return; initialised = true;
   tools.init({ dataDir: dataDir(), describe: describeMedia });
   voicefix.init(dataDir());
+  voiceid.init(dataDir());
   tools.addTools([
     { name: 'fix_misheard_word', description: 'Teach voice recognition a correction. Use when the user says you misheard them, e.g. "you heard jueves, I said Jarvis" or "it is Arjun, not Ajun". From now on the heard text is replaced with what they said in every transcript.', parameters: { type: 'OBJECT', properties: { heard: { type: 'STRING', description: 'What speech recognition wrote' }, said: { type: 'STRING', description: 'What the user actually said' } }, required: ['heard', 'said'] }, summary: (a) => `Hear "${a.said}" instead of "${a.heard}"`, run: async (a) => { voicefix.addFix(a.heard, a.said); return { status: 'done', detail: `From now on "${a.heard}" becomes "${a.said}".` }; } },
     { name: 'add_voice_word', description: 'Add a word or name the user says often (a friend, a game, a place) so voice recognition expects it.', parameters: { type: 'OBJECT', properties: { word: { type: 'STRING' } }, required: ['word'] }, summary: (a) => `Listen for "${a.word}"`, run: async (a) => { voicefix.addWord(a.word); return { status: 'done' }; } },
@@ -684,6 +686,18 @@ function createServer() {
       } catch (err) { send(res, err.status || 400, { error: err.message }); }
       return;
     }
+    if (url.pathname.startsWith('/api/voiceid')) {
+      try {
+        if (req.method === 'POST' && (url.pathname === '/api/voiceid/enroll' || url.pathname === '/api/voiceid/test')) {
+          const audio = await readBytes(req);
+          send(res, 200, url.pathname.endsWith('enroll') ? await voiceid.enroll(audio) : voiceid.test(audio));
+        } else if (req.method === 'POST' && url.pathname === '/api/voiceid/settings') send(res, 200, voiceid.settings(await readJson(req)));
+        else if (req.method === 'POST' && url.pathname === '/api/voiceid/reset') send(res, 200, voiceid.reset());
+        else if (req.method === 'POST' && url.pathname === '/api/voiceid/model') { await voiceid.ensureModel(); send(res, 200, voiceid.state()); }
+        else send(res, 200, voiceid.state());
+      } catch (err) { send(res, 400, { error: err.message }); }
+      return;
+    }
     if (url.pathname.startsWith('/api/voicefix')) {
       try {
         const body = req.method === 'POST' ? await readJson(req) : {};
@@ -894,7 +908,9 @@ function createServer() {
       return;
     }
     if (req.method === 'POST' && url.pathname === '/api/voice/asr') {
-      try { const audio = await readBytes(req); const type = req.headers['content-type'] || ''; const r = await transcribeSpeech(audio, type); send(res, 200, { text: voicefix.apply(r.value), via: r.via }); }
+      try { const audio = await readBytes(req); const type = req.headers['content-type'] || '';
+        if (/wav/i.test(type) && !voiceid.checkWav(audio).ok) { send(res, 200, { text: '', ignored: true }); return; }
+        const r = await transcribeSpeech(audio, type); send(res, 200, { text: voicefix.apply(r.value), via: r.via }); }
       catch (err) { send(res, err.status || 400, { error: err.message || 'Voice transcription failed.' }); }
       return;
     }
