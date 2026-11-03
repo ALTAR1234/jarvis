@@ -39,5 +39,18 @@
   };
   $('#lockstart').onclick = async () => { await post('/api/preferences', { lockOnStart: $('#lockstart').textContent !== 'On' }); load(); };
   $('#idle').onchange = async () => { await post('/api/preferences', { lockIdleMinutes: +$('#idle').value }); toast('Saved'); };
+  // Voice words and corrections
+  async function loadWords(d) {
+    d = d || await get('/api/voicefix');
+    $('#vwords').innerHTML = d.words.length ? d.words.map((w) => `<span class="chip">${esc(w)}<button data-rmw="${esc(w)}" title="Remove">×</button></span>`).join('') : '<small style="color:var(--faint)">None yet</small>';
+    $('#vfixes').innerHTML = d.fixes.length ? d.fixes.map((f) => `<div class="fix"><span><s>${esc(f.heard)}</s> → <b>${esc(f.said)}</b></span><button data-rmf="${esc(f.heard)}" title="Remove">×</button></div>`).join('') : '<small style="color:var(--faint)">None yet</small>';
+    $$('[data-rmw]').forEach((b) => (b.onclick = async () => loadWords(await post('/api/voicefix/word', { word: b.dataset.rmw, remove: true }))));
+    $$('[data-rmf]').forEach((b) => (b.onclick = async () => loadWords(await post('/api/voicefix/fix', { heard: b.dataset.rmf, remove: true }))));
+  }
+  $('#addvword').onclick = async () => { try { loadWords(await post('/api/voicefix/word', { word: $('#vword').value })); $('#vword').value = ''; } catch (e) { toast(e.message); } };
+  $('#addvfix').onclick = async () => { try { loadWords(await post('/api/voicefix/fix', { heard: $('#vheard').value, said: $('#vsaid').value })); $('#vheard').value = $('#vsaid').value = ''; toast('Got it. I will hear that right from now on.'); } catch (e) { toast(e.message); } };
+  $('#vword').onkeydown = (e) => { if (e.key === 'Enter') $('#addvword').click(); };
+  $('#vsaid').onkeydown = (e) => { if (e.key === 'Enter') $('#addvfix').click(); };
+  loadWords().catch(() => {});
   load().catch((e) => toast(e.message));
 })();

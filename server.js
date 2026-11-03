@@ -12,6 +12,7 @@ const inbox = require('./core/inbox');
 const helper = require('./core/helper');
 const brains = require('./core/brains');
 const osapps = require('./core/osapps');
+const voicefix = require('./core/voicefix');
 
 const ROOT = __dirname;
 const PUBLIC = path.join(ROOT, 'public');
@@ -104,7 +105,7 @@ function contextPrompt(voice, timeZone) {
   const prof = readPreferences();
   const docked = appdock.state();
   const who = [prof.userName && `The user's name is ${prof.userName}.`, prof.homeCity && `They live in ${prof.homeCity}.`, docked.apps.length && `Apps docked in the HUD: ${docked.apps.map((a) => a.name).join(', ')}; on screen: ${docked.apps.find((a) => a.handle === docked.active)?.name || 'the J.A.R.V.I.S. home screen'}.`].filter(Boolean).join(' ');
-  return `${SYSTEM_PROMPT} ${TOOL_PROMPT} ${who} The current local date and time is ${now}${zone ? ` (${zone})` : ''}.${voice ? ' ' + VOICE_PROMPT : ''}${facts ? `\n\nWhat you remember about the user (from long-term memory):\n${facts}` : ''}`;
+  return `${SYSTEM_PROMPT} ${TOOL_PROMPT} ${who} The current local date and time is ${now}${zone ? ` (${zone})` : ''}.${voice ? ' ' + VOICE_PROMPT + ' ' + voicefix.hint() : ''}${facts ? `\n\nWhat you remember about the user (from long-term memory):\n${facts}` : ''}`;
 }
 async function geminiGenerate(model, body, timeoutMs) {
   if (!/^[A-Za-z0-9._-]+$/.test(model)) throw Object.assign(new Error('A configured Gemini model name contains invalid characters.'), { status: 500 });
@@ -383,6 +384,13 @@ let initialised = false;
 function initAssistant() {
   if (initialised) return; initialised = true;
   tools.init({ dataDir: dataDir(), describe: describeMedia });
+  voicefix.init(dataDir());
+  tools.addTools([
+    { name: 'fix_misheard_word', description: 'Teach voice recognition a correction. Use when the user says you misheard them, e.g. "you heard jueves, I said Jarvis" or "it is Arjun, not Ajun". From now on the heard text is replaced with what they said in every transcript.', parameters: { type: 'OBJECT', properties: { heard: { type: 'STRING', description: 'What speech recognition wrote' }, said: { type: 'STRING', description: 'What the user actually said' } }, required: ['heard', 'said'] }, summary: (a) => `Hear "${a.said}" instead of "${a.heard}"`, run: async (a) => { voicefix.addFix(a.heard, a.said); return { status: 'done', detail: `From now on "${a.heard}" becomes "${a.said}".` }; } },
+    { name: 'add_voice_word', description: 'Add a word or name the user says often (a friend, a game, a place) so voice recognition expects it.', parameters: { type: 'OBJECT', properties: { word: { type: 'STRING' } }, required: ['word'] }, summary: (a) => `Listen for "${a.word}"`, run: async (a) => { voicefix.addWord(a.word); return { status: 'done' }; } },
+    { name: 'list_voice_words', description: 'List the words and misheard-word corrections voice recognition has been taught.', parameters: { type: 'OBJECT', properties: {} }, summary: () => 'Voice words', run: async () => ({ status: 'done', ...voicefix.state() }) },
+    { name: 'forget_voice_fix', description: 'Remove a misheard-word correction or a voice word.', parameters: { type: 'OBJECT', properties: { text: { type: 'STRING', description: 'The heard text of the correction, or the word' } }, required: ['text'] }, summary: (a) => `Forget "${a.text}"`, run: async (a) => { voicefix.removeFix(a.text); voicefix.removeWord(a.text); return { status: 'done' }; } }
+  ]);
   tools.addTools(browser.tools(describeMedia));
   inbox.init({ askJson: (parts) => askGemini(parts, true), dataDir: dataDir() });
   helper.init({ askJson: (parts) => askGemini(parts, true), ask: (parts) => askGemini(parts), dataDir: dataDir() });
@@ -671,6 +679,15 @@ function createServer() {
       } catch (err) { send(res, err.status || 400, { error: err.message }); }
       return;
     }
+    if (url.pathname.startsWith('/api/voicefix')) {
+      try {
+        const body = req.method === 'POST' ? await readJson(req) : {};
+        if (url.pathname === '/api/voicefix/word') send(res, 200, body.remove ? voicefix.removeWord(body.word) : voicefix.addWord(body.word));
+        else if (url.pathname === '/api/voicefix/fix') send(res, 200, body.remove ? voicefix.removeFix(body.heard) : voicefix.addFix(body.heard, body.said));
+        else send(res, 200, voicefix.state());
+      } catch (err) { send(res, 400, { error: err.message }); }
+      return;
+    }
     if (req.method === 'GET' && url.pathname === '/api/status') {
       const provider = voiceProvider();
       send(res, 200, {
@@ -872,7 +889,7 @@ function createServer() {
       return;
     }
     if (req.method === 'POST' && url.pathname === '/api/voice/asr') {
-      try { const audio = await readBytes(req); const type = req.headers['content-type'] || ''; const r = await transcribeSpeech(audio, type); send(res, 200, { text: r.value, via: r.via }); }
+      try { const audio = await readBytes(req); const type = req.headers['content-type'] || ''; const r = await transcribeSpeech(audio, type); send(res, 200, { text: voicefix.apply(r.value), via: r.via }); }
       catch (err) { send(res, err.status || 400, { error: err.message || 'Voice transcription failed.' }); }
       return;
     }

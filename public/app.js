@@ -13,6 +13,11 @@ const nameHeard = (t) => WAKE_RE.test(t) || Boolean(wakeWord) && new RegExp(`\\b
 const SLEEP_CMD = new RegExp(`(^|\\b(${WAKE_NAMES})\\b[\\s,!.]*|\\b(please|ok(ay)?|now|hey)\\b[\\s,]*)(go to sleep|go to bed|go on standby|go offline|sleep now)\\b|\\b(sleep mode|standby mode|stop listening)\\b`, 'i');
 const SELF_SLEEP = /\b(i'?m|i am|i will|i'?ll|i want to|we'?re|i)\s+(going to |gonna |about to )?(go to sleep|go to bed)\b/i;
 const isSleepCommand = (t) => SLEEP_CMD.test(t.trim()) && !SELF_SLEEP.test(t);
+// Corrections taught in Controller or by voice ("you heard jueves, I said Jarvis"), for live voice text that arrives in pieces.
+let heardFixes = [];
+const loadHeardFixes = () => fetch('/api/voicefix').then((r) => r.json()).then((d) => { heardFixes = (d.fixes || []).sort((a, b) => b.heard.length - a.heard.length); }).catch(() => {});
+loadHeardFixes(); setInterval(loadHeardFixes, 60000);
+const fixHeard = (t) => heardFixes.reduce((out, f) => out.replace(new RegExp(`(^|[^\\p{L}\\p{N}'])${f.heard.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=$|[^\\p{L}\\p{N}'])`, 'giu'), (_m, pre) => pre + f.said), String(t || ''));
 const regularAsleep = () => handsFreeEnabled && (regularSleeping || regularWakeOn && Date.now() >= regularAwakeUntil);
 // Regular voice: stop answering until the name is heard again (Live has its own sleep).
 window.jarvisRegularSleep = () => regularSleep();
@@ -346,7 +351,7 @@ const live = (() => {
 
   function remember(role, content) { content = content.trim(); if (!content) return; messages.push({ role, content }); while (messages.length > 20) messages.shift(); }
   // "Jarvis, go to sleep" (but not "I'm going to sleep"): let the goodnight reply finish, then sleep.
-  function finishUser() { if (s.userEl) { const said = s.userText; remember('user', said); s.userEl = null; s.userText = ''; window.onUserSpeech?.(''); if (isSleepCommand(said)) sleepAfterReply(); } }
+  function finishUser() { if (s.userEl) { const said = fixHeard(s.userText); if (said !== s.userText) s.userEl.textContent = said; remember('user', said); s.userEl = null; s.userText = ''; window.onUserSpeech?.(''); if (isSleepCommand(said)) sleepAfterReply(); } }
   function sleepAfterReply() {
     if (!s.on || s.asleep || s.sleepPending) return;
     s.sleepPending = true; s.turnDone = false;

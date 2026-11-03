@@ -24,6 +24,9 @@
   .pinrow { display: flex; gap: 8px; margin: 8px 0; } .pinrow input { flex: 1; }
   .opt { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 0; color: var(--dim); }
   .span2 { grid-column: 1 / -1; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 10px; } .chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 10px; border-radius: 9px; background: rgb(56 207 255 / .1); color: #9fe6ff; font-size: 13px; font-weight: 650; }
+  .chip button, .fix button { border: 0; background: none; color: var(--faint); cursor: pointer; font-size: 15px; line-height: 1; padding: 0 4px; } .chip button:hover, .fix button:hover { color: var(--pink); }
+  .fix { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 14px; } .fix s { color: var(--faint); } .fix b { color: var(--ok); } .fix span { flex: 1; }
 </style>
 </head>
 <body>
@@ -62,6 +65,15 @@
       <div class="card"><h3>Voice</h3>
         <div class="tiles" id="voicemode"><button class="tile" data-live="true" data-engine="gemini"><span>⚡</span>Live · Gemini<small>talk back and forth, interrupt anytime</small></button><button class="tile" data-live="true" data-engine="chatgpt"><span>❂</span>Live · ChatGPT<small>OpenAI voice and speech recognition</small></button><button class="tile" data-live="false"><span>🎙</span>Regular<small>replies after you finish talking</small></button></div>
         <p style="color:var(--faint);font-size:12.5px;margin:10px 0 0">If Gemini Live reaches its limit, ChatGPT takes over live voice (with an OpenAI key), otherwise Regular. Applies the next time you click the mic.</p>
+      </div>
+      <div class="card span2"><h3>Voice words</h3>
+        <p style="color:var(--faint);font-size:12.5px;margin:0 0 10px">Teach J.A.R.V.I.S. your words. Names and words you say often help speech recognition expect them; corrections fix what it keeps mishearing. You can also just say "you heard jueves, I said Jarvis".</p>
+        <div class="opt">Words I say often</div>
+        <div class="chips" id="vwords"></div>
+        <div class="pinrow"><input class="field" id="vword" placeholder="A name or word, e.g. Valorant" maxlength="40"><button class="btn" id="addvword">Add word</button></div>
+        <div class="opt" style="margin-top:12px">Corrections</div>
+        <div id="vfixes"></div>
+        <div class="pinrow"><input class="field" id="vheard" placeholder="It heard… (e.g. jueves)" maxlength="60"><input class="field" id="vsaid" placeholder="I said… (e.g. Jarvis)" maxlength="60"><button class="btn" id="addvfix">Add correction</button></div>
       </div>
       <div class="card span2"><h3>Locker</h3>
         <div class="opt">PIN <span id="pinstate"></span></div>

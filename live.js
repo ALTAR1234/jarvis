@@ -5,6 +5,7 @@
 //        {type:'interrupted'} | {type:'handle', handle} | {type:'goAway'} | {type:'error', message} | {type:'closed', reason}
 const { WebSocketServer, WebSocket } = require('ws');
 const { openaiLive } = require('./core/live-openai');
+const voicefix = require('./core/voicefix');
 
 const LIVE_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
 const MAX_FRAME = 512 * 1024;
@@ -83,7 +84,7 @@ function bridge(client, { systemPrompt, tools, voice, engine }) {
       const sc = msg.serverContent;
       if (sc) {
         for (const part of sc.modelTurn?.parts || []) if (part.inlineData?.data) toClient({ type: 'audio', data: part.inlineData.data });
-        if (sc.inputTranscription?.text) toClient({ type: 'input', text: sc.inputTranscription.text });
+        if (sc.inputTranscription?.text) toClient({ type: 'input', text: voicefix.apply(sc.inputTranscription.text) });
         if (sc.outputTranscription?.text) toClient({ type: 'output', text: sc.outputTranscription.text });
         if (sc.interrupted) toClient({ type: 'interrupted' });
         if (sc.turnComplete) toClient({ type: 'turnComplete' });

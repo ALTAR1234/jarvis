@@ -2,6 +2,7 @@
 // OpenAI Realtime API. Used when the user picks ChatGPT for live voice, or when Gemini Live runs out.
 const { WebSocket } = require('ws');
 const { jsonSchema } = require('./brains');
+const voicefix = require('./voicefix');
 
 const URL_BASE = 'wss://api.openai.com/v1/realtime';
 const MAX_HISTORY = 20;
@@ -49,7 +50,7 @@ function openaiLive({ history, timeZone }, { toClient, systemPrompt, tools, onCl
         format: { type: 'audio/pcm', rate: 24000 },
         // Waits through mid-sentence pauses before answering.
         turn_detection: { type: 'server_vad', threshold: 0.5, prefix_padding_ms: 300, silence_duration_ms: 900, create_response: true, interrupt_response: true },
-        transcription: { model: process.env.OPENAI_ASR_MODEL || 'gpt-4o-mini-transcribe', language: 'en', prompt: 'Someone talking to their voice assistant, Jarvis.' }
+        transcription: { model: process.env.OPENAI_ASR_MODEL || 'gpt-4o-mini-transcribe', language: 'en', prompt: `Someone talking to their voice assistant, Jarvis. ${voicefix.hint()}`.slice(0, 900) }
       },
       output: { format: { type: 'audio/pcm', rate: 24000 }, voice: process.env.OPENAI_LIVE_VOICE || 'cedar' }
     },
@@ -65,7 +66,7 @@ function openaiLive({ history, timeZone }, { toClient, systemPrompt, tools, onCl
       case 'session.updated': if (!ready) { ready = true; toClient({ type: 'ready', resumed: false }); } break;
       case 'response.output_audio.delta': case 'response.audio.delta': if (ev.delta) { speaking = true; toClient({ type: 'audio', data: ev.delta }); } break;
       case 'response.output_audio_transcript.delta': case 'response.audio_transcript.delta': if (ev.delta) toClient({ type: 'output', text: ev.delta }); break;
-      case 'conversation.item.input_audio_transcription.completed': if (ev.transcript?.trim()) toClient({ type: 'input', text: ev.transcript.trim() }); break;
+      case 'conversation.item.input_audio_transcription.completed': if (ev.transcript?.trim()) toClient({ type: 'input', text: voicefix.apply(ev.transcript.trim()) }); break;
       case 'input_audio_buffer.speech_started': if (speaking) { speaking = false; toClient({ type: 'interrupted' }); } break;
       case 'response.function_call_arguments.done': calls.push({ id: ev.call_id, name: ev.name, args: ev.arguments }); break;
       case 'response.done': {
