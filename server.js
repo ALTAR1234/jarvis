@@ -14,6 +14,17 @@ const brains = require('./core/brains');
 const osapps = require('./core/osapps');
 const voicefix = require('./core/voicefix');
 const voiceid = require('./core/voiceid');
+const screenagent = require('./core/screenagent');
+
+// "Control my screen" runs in the background; the banner (main.cjs) and the HUD follow it through 'screen' events.
+function startScreenTask(task) {
+  if (!process.env.ANTHROPIC_API_KEY) throw new Error('Screen control uses Claude. Add ANTHROPIC_API_KEY to the configuration file first.');
+  if (screenagent.state().running) throw new Error('I am already controlling the screen. Say "stop controlling my screen" or press Ctrl+Alt+X first.');
+  const publish = (s) => { store.emit('screen', s); globalThis.jarvisScreenControl?.(s); };
+  screenagent.run(task, { confirm: (action) => store.requestConfirm({ tool: 'control_screen', summary: action }), onState: publish })
+    .then((text) => publish({ running: false, done: true, text }))
+    .catch((err) => publish({ running: false, done: true, error: true, text: `I had to stop: ${err.message}` }));
+}
 
 const ROOT = __dirname;
 const PUBLIC = path.join(ROOT, 'public');
@@ -502,6 +513,11 @@ function initAssistant() {
       run: async (a) => { windowAction(a.action === 'return' ? 'restore' : 'desktop'); return { status: 'done', note: a.action === 'return' ? undefined : 'Say Jarvis or press Ctrl+Shift+J to bring the HUD back; voice keeps working.' }; } }
   ]);
   tools.addTools([
+    { name: 'control_screen', description: 'Take over the mouse and keyboard to do a task on the user\'s screen by looking at it and clicking and typing, like a person would: going through a website, an app, a settings page or a form. Use it when the user asks you to do something on their computer that your other tools cannot do directly. It runs in the background with a banner and a Stop button; tell the user briefly that you are on it, and it reports back when done.',
+      parameters: { type: 'OBJECT', properties: { task: { type: 'STRING', description: 'The whole task in plain words, with every detail the user gave (names, text to type, which site or app).' } }, required: ['task'] },
+      summary: (a) => `Control the screen: ${String(a.task).slice(0, 120)}`, run: async (a) => { startScreenTask(String(a.task || '')); return { status: 'started', detail: 'Screen control started. The user can say stop or press Ctrl+Alt+X. You will be told the result when it finishes.' }; } },
+    { name: 'stop_screen_control', description: 'Stop controlling the user\'s screen right away (when they say stop, cancel, or that they want the mouse back).', parameters: { type: 'OBJECT', properties: {} },
+      summary: () => 'Stop controlling the screen', run: async () => ({ status: 'done', ...screenagent.stop() }) },
     { name: 'go_to_sleep', description: 'Put J.A.R.V.I.S. to sleep: stop listening until the user says "Jarvis, wake up". Use when the user tells you to sleep, stop listening, go on standby, or says they are done for now. Say a brief goodnight as you do.', parameters: { type: 'OBJECT', properties: {} },
       summary: () => 'Going to sleep', run: async () => { store.emit('sleep'); return { status: 'done', detail: 'Sleeping after this reply. The user wakes you by saying "Jarvis, wake up".' }; } },
     { name: 'daily_briefing', description: 'Get the user\'s briefing: local weather, top news headlines, today\'s reminders and PC notes, as a ready-to-speak summary. Use for "brief me", "what\'s the news", "good morning".', parameters: { type: 'OBJECT', properties: { refresh: { type: 'BOOLEAN', description: 'Fetch fresh news instead of the last 30 minutes\' briefing' } } },
@@ -704,6 +720,8 @@ function createServer() {
       } catch (err) { send(res, err.status || 400, { error: err.message }); }
       return;
     }
+    if (url.pathname === '/api/screen') { send(res, 200, screenagent.state()); return; }
+    if (req.method === 'POST' && url.pathname === '/api/screen/stop') { send(res, 200, screenagent.stop()); return; }
     if (url.pathname.startsWith('/api/voiceid')) {
       try {
         if (req.method === 'POST' && (url.pathname === '/api/voiceid/enroll' || url.pathname === '/api/voiceid/test')) {

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>J.A.R.V.I.S. is controlling the screen</title>
+<style>
+  html, body { margin: 0; background: transparent; font-family: "Segoe UI", Arial, sans-serif; color: #b9e7ff; overflow: hidden; user-select: none; }
+  body { background: #030913; }
+  .bar { box-sizing: border-box; margin: 0; padding: 10px 12px; border: 1px solid #00b9f0; border-radius: 12px; background: linear-gradient(140deg, #06172a, #030913); box-shadow: 0 0 18px #00aeff55; }
+  .top { display: flex; align-items: center; gap: 12px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #1ee2ff; box-shadow: 0 0 10px #00dfff; animation: pulse 1.2s ease-in-out infinite alternate; flex: none; }
+  @keyframes pulse { to { opacity: .35; } }
+  .txt { flex: 1; min-width: 0; }
+  b { display: block; font-size: 12px; letter-spacing: .5px; color: #d8f2ff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  small { display: block; font-size: 12px; color: #6fc7ef; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  button { font: inherit; font-size: 13px; cursor: pointer; border-radius: 16px; padding: 6px 14px; }
+  #stop { border: 1px solid #ff6a7d; background: #2a0b14; color: #ffc2cb; flex: none; }
+  #stop:hover { background: #3d0f1c; }
+  .ask { display: none; margin-top: 10px; padding-top: 10px; border-top: 1px solid #12405e; }
+  .ask.on { display: block; }
+  .ask p { margin: 0 0 8px; font-size: 13px; color: #fff; }
+  .ask button { margin-right: 8px; border: 1px solid #00b9f0; background: #062237; color: #bfefff; }
+  .ask #deny { border-color: #5d7b92; background: #0a1520; color: #a9c3d6; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <div class="top">
+    <span class="dot"></span>
+    <div class="txt"><b>J.A.R.V.I.S. IS CONTROLLING YOUR SCREEN</b><small id="note">Starting…</small></div>
+    <button id="stop" title="Stop (Ctrl+Alt+X)">■ Stop</button>
+  </div>
+  <div class="ask" id="ask"><p id="askText"></p><button id="allow">Allow</button><button id="deny">Don't allow</button></div>
+</div>
+<script>
+  // Shows the current step, lets the user stop, and answers "is this OK?" questions while J.A.R.V.I.S. is minimized.
+  const $ = (id) => document.getElementById(id);
+  const post = (url, body) => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) });
+  let asking = null;
+  $('stop').onclick = () => { post('/api/screen/stop'); $('note').textContent = 'Stopping…'; };
+  const answer = (allow) => { if (!asking) return; post('/api/confirm', { id: asking, allow }); asking = null; $('ask').classList.remove('on'); };
+  $('allow').onclick = () => answer(true);
+  $('deny').onclick = () => answer(false);
+  fetch('/api/screen').then((r) => r.json()).then((s) => { if (s.running) $('note').textContent = `${s.note} · ${s.task}`; }).catch(() => {});
+  const es = new EventSource('/api/events');
+  es.onmessage = (e) => {
+    let ev; try { ev = JSON.parse(e.data); } catch { return; }
+    if (ev.type === 'screen' && ev.running) $('note').textContent = `${ev.note} · ${ev.task}`;
+    else if (ev.type === 'confirm' && ev.tool === 'control_screen') { asking = ev.id; $('askText').textContent = `OK to: ${ev.summary}?`; $('ask').classList.add('on'); }
+    else if (ev.type === 'confirmResolved' && ev.id === asking) { asking = null; $('ask').classList.remove('on'); }
+  };
+</script>
+</body>
+</html>

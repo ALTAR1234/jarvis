@@ -112,6 +112,7 @@
       else if (ev.type === 'appdock') window.jarvisAppPanel?.[ev.action]?.(ev);
       else if (ev.type === 'launcher') window.jarvisLauncher?.[ev.action]?.();
       else if (ev.type === 'browser') window.jarvisBrowser?.[ev.action]?.();
+      else if (ev.type === 'screen' && ev.done) { addMessage('assistant', ev.text, ev.error ? 'error' : ''); messages.push({ role: 'assistant', content: ev.text }); if (!live.on && voiceOn) speak(ev.text); else showToast(ev.text); }
       else if (ev.type === 'briefing') window.dispatchEvent(new CustomEvent('jarvis-briefing', { detail: ev }));
       else if (ev.type === 'profile') fetch('/api/preferences').then((r) => r.json()).then((p) => { $('userName').textContent = p.userName || 'there'; });
     };

@@ -191,6 +191,24 @@ function setupOsWindows(prefs) {
   };
   globalThis.jarvisUnlock = () => { locked = false; const w = overlays.locker; if (w && !w.isDestroyed()) { w.setKiosk?.(false); w.close(); } };
   globalShortcut.register('CommandOrControl+Alt+L', () => globalThis.jarvisLock());
+  // Screen control: J.A.R.V.I.S. steps aside (minimized) and a small banner with a Stop button stays on top.
+  // The banner is hidden from screenshots, so Claude never sees or clicks it. Ctrl+Alt+X stops at any time.
+  let screenBanner = null, wasMinimized = false;
+  globalThis.jarvisScreenControl = async (s) => {
+    if (s.running) {
+      if (screenBanner) return;
+      wasMinimized = Boolean(mainWindow?.isMinimized());
+      if (mainWindow && !wasMinimized) { if (mainWindow.isFullScreen()) mainWindow.setFullScreen(false); mainWindow.minimize(); }
+      const area = screen.getPrimaryDisplay().workArea;
+      screenBanner = overlay('screen-banner', { bounds: { x: Math.round(area.x + (area.width - 560) / 2), y: area.y + 8, width: 560, height: 190 }, focusable: false })
+        .then((w) => { w.setContentProtection(true); return w; });
+    } else {
+      const opening = screenBanner; screenBanner = null;
+      if (opening) opening.then((w) => { if (!w.isDestroyed()) w.close(); }).catch(() => {});
+      if (mainWindow && !wasMinimized) { mainWindow.restore(); if (prefs.fullscreen !== false) mainWindow.setFullScreen(true); }
+    }
+  };
+  globalShortcut.register('CommandOrControl+Alt+X', () => require('./core/screenagent').stop());
   setInterval(() => {
     let p = {};
     try { p = JSON.parse(fs.readFileSync(process.env.ASSISTANT_PREFERENCES_PATH, 'utf8')) || {}; } catch {}
