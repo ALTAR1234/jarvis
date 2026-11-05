@@ -30,7 +30,29 @@ const describe = (name, a = {}) => {
     left_click: `Clicking${at}`, double_click: `Double-clicking${at}`, right_click: `Right-clicking${at}`, left_click_drag: 'Dragging', mouse_move: 'Moving the mouse' }[name] || name.replace(/_/g, ' ');
 };
 
-function state() { return current ? { running: true, task: current.task, step: current.step, note: current.note } : { running: false }; }
+// Claude's own words about what went wrong, so the user (and the Controller) can see the real reason.
+let lastError = null;
+function explain(e) {
+  const said = String(e?.error?.error?.message || e?.message || e).replace(/sk-ant-[\w-]+/g, '[key]').slice(0, 300);
+  const msg = /credit balance/i.test(said) ? 'Your Anthropic account is out of credit, so Claude can\'t control the screen. Add credit at console.anthropic.com → Plans & Billing, then try again.'
+    : e instanceof Anthropic.AuthenticationError ? `Claude rejected the API key (${said}). Check ANTHROPIC_API_KEY in the configuration file.`
+    : e instanceof Anthropic.PermissionDeniedError ? `This Claude account can't use screen control (${said}).`
+    : e instanceof Anthropic.RateLimitError ? `Claude is rate-limited or out of credit (${said}).`
+    : e instanceof Anthropic.APIError ? `Claude returned an error (${e.status}): ${said}`
+    : `Could not reach Claude: ${said}`;
+  lastError = { at: new Date().toISOString(), model: MODEL(), status: e?.status ?? null, message: msg };
+  return new Error(msg);
+}
+// A tiny request with the same model and tools (no screenshot, no control) to check that screen control can run.
+async function check() {
+  if (!process.env.ANTHROPIC_API_KEY) return { ok: false, model: MODEL(), message: 'ANTHROPIC_API_KEY is not set in the configuration file.' };
+  try {
+    const r = await claude().messages.create({ model: MODEL(), max_tokens: 400, output_config: { effort: 'low' }, tools: [{ type: 'computer_toolset_20260801' }, ASK], messages: [{ role: 'user', content: 'This is a connection test. Reply with just OK and do not use any tools.' }] });
+    return { ok: true, model: r.model, stop: r.stop_reason };
+  } catch (e) { return { ok: false, model: MODEL(), message: explain(e).message }; }
+}
+
+function state() { return current ? { running: true, task: current.task, step: current.step, note: current.note } : { running: false, lastError }; }
 function stop() { if (current) { current.stopped = true; current.abort.abort(); } return state(); }
 
 // Runs the task; resolves with the final spoken-style sentence. hooks: { confirm(text) -> Promise<bool>, onState(state) }.
@@ -60,9 +82,7 @@ async function run(task, hooks = {}) {
         response = await claude().messages.create({ model: MODEL(), max_tokens: 16000, output_config: { effort: 'medium' }, system: SYSTEM, tools: [{ type: 'computer_toolset_20260801' }, ASK], messages }, { signal: me.abort.signal });
       } catch (e) {
         if (me.stopped) return 'Stopped. You have control of the screen again.';
-        if (e instanceof Anthropic.AuthenticationError) throw new Error('Claude rejected the API key. Check ANTHROPIC_API_KEY in the configuration file.');
-        if (e instanceof Anthropic.APIError) throw new Error(`Claude returned an error (${e.status}): ${String(e.error?.error?.message || e.message).slice(0, 200)}`);
-        throw e;
+        throw explain(e);
       }
       messages.push({ role: 'assistant', content: response.content });
       const said = response.content.filter((b) => b.type === 'text').map((b) => b.text).join(' ').trim();
@@ -103,4 +123,4 @@ async function run(task, hooks = {}) {
   }
 }
 
-module.exports = { run, stop, state, SYSTEM };
+module.exports = { run, stop, state, check, SYSTEM };

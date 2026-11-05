@@ -722,6 +722,7 @@ function createServer() {
     }
     if (url.pathname === '/api/screen') { send(res, 200, screenagent.state()); return; }
     if (req.method === 'POST' && url.pathname === '/api/screen/stop') { send(res, 200, screenagent.stop()); return; }
+    if (req.method === 'POST' && url.pathname === '/api/screen/check') { send(res, 200, await screenagent.check()); return; }
     if (url.pathname.startsWith('/api/voiceid')) {
       try {
         if (req.method === 'POST' && (url.pathname === '/api/voiceid/enroll' || url.pathname === '/api/voiceid/test')) {
