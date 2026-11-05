@@ -7,6 +7,7 @@ const screen = require('./screen');
 
 const MODEL = () => process.env.CLAUDE_SCREEN_MODEL || process.env.CLAUDE_MODEL || 'claude-opus-5-5';
 const OPENAI_MODEL = () => process.env.OPENAI_SCREEN_MODEL || 'gpt-6.1-sol';
+const GEMINI_MODEL = () => process.env.GEMINI_SCREEN_MODEL || 'gemini-3.8-flash';
 const MAX_ACTIONS = 80, MAX_MINUTES = 15, TURNS_PER_CHAPTER = 14;
 const SYSTEM = `You are J.A.R.V.I.S., the user's assistant, and you are controlling the user's own Windows PC (a real computer, not a sandbox) with the mouse and keyboard to do one task they asked for.
 
@@ -27,8 +28,9 @@ const DENIED = 'denied: do not do it; find another way or stop and tell the user
 
 let client = null, current = null;
 const claude = () => (client ||= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 2, timeout: 120000 }));
-const have = { claude: () => Boolean(process.env.ANTHROPIC_API_KEY), chatgpt: () => Boolean(process.env.OPENAI_API_KEY) };
-const NAME = { claude: 'Claude', chatgpt: 'ChatGPT' };
+const have = { claude: () => Boolean(process.env.ANTHROPIC_API_KEY), chatgpt: () => Boolean(process.env.OPENAI_API_KEY), gemini: () => Boolean(process.env.GEMINI_API_KEY) };
+const NAME = { claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini' };
+const ENGINES = ['claude', 'chatgpt', 'gemini'];
 const describe = (name, a = {}) => {
   const at = a.coordinate ? ` at ${a.coordinate.join(',')}` : '';
   return { screenshot: 'Looking at the screen', zoom: 'Looking closer', type: `Typing "${String(a.text || '').slice(0, 40)}"`, key: `Pressing ${a.text}`, scroll: `Scrolling ${a.scroll_direction}`, wait: 'Waiting',
@@ -78,6 +80,11 @@ async function check() {
     try { const r = await openai({ model: OPENAI_MODEL(), tools: [{ type: 'computer' }, ASK_FN], input: 'This is a connection test. Reply with just OK and do not use any tools.' }); out.chatgpt = { ok: true, model: r.model }; }
     catch (e) { out.chatgpt = { ok: false, model: OPENAI_MODEL(), message: e.message }; }
   }
+  if (!have.gemini()) out.gemini = { ok: false, model: GEMINI_MODEL(), message: 'GEMINI_API_KEY is not set.' };
+  else {
+    try { const r = await gemini({ model: GEMINI_MODEL(), tools: geminiTools(), input: [{ type: 'text', text: 'This is a connection test. Reply with just OK and do not use any tools.' }] }); out.gemini = { ok: true, model: r.model || GEMINI_MODEL() }; }
+    catch (e) { out.gemini = { ok: false, model: GEMINI_MODEL(), message: e.message }; }
+  }
   return out;
 }
 
@@ -88,8 +95,8 @@ function stop() { if (current) { current.stopped = true; current.abort.abort(); 
 // hooks: { engine: 'claude' | 'chatgpt', confirm(text) -> Promise<bool>, onState(state) }.
 async function run(task, hooks = {}) {
   if (current) throw new Error('I am already controlling the screen. Say "stop" or press Ctrl+Alt+X first.');
-  const first = hooks.engine === 'chatgpt' ? 'chatgpt' : 'claude', order = [first, first === 'claude' ? 'chatgpt' : 'claude'].filter((e) => have[e]());
-  if (!order.length) throw new Error('Screen control needs ANTHROPIC_API_KEY (Claude) or OPENAI_API_KEY (ChatGPT) in the configuration file.');
+  const first = ENGINES.includes(hooks.engine) ? hooks.engine : 'claude', order = [first, ...ENGINES.filter((e) => e !== first)].filter((e) => have[e]());
+  if (!order.length) throw new Error('Screen control needs a Claude, ChatGPT or Gemini key in the configuration file.');
   const me = current = { task: String(task).slice(0, 1000), step: 0, note: 'Starting', stopped: false, abort: new AbortController(), started: Date.now(), engine: order[0] };
   const ctx = { me, log: [], hooks, update: (note) => { me.note = note; hooks.onState?.(state()); } };
   try {
@@ -97,7 +104,7 @@ async function run(task, hooks = {}) {
     await new Promise((r) => setTimeout(r, 900)); // let J.A.R.V.I.S. minimize and the banner appear first
     for (let i = 0; i < order.length; i++) {
       me.engine = order[i];
-      try { return await (me.engine === 'claude' ? runClaude : runChatGPT)(ctx); }
+      try { return await { claude: runClaude, chatgpt: runChatGPT, gemini: runGemini }[me.engine](ctx); }
       catch (err) {
         // Only switch before anything was done on screen, and only for account or setup problems.
         if (me.stopped) return STOPPED;
@@ -247,4 +254,85 @@ async function runChatGPT(ctx) {
   }
 }
 
-module.exports = { run, stop, state, check, SYSTEM, translate };
+// ---- Gemini: Interactions API computer use (desktop environment, coordinates on a 0-999 grid) ----
+async function gemini(body, signal) {
+  const r = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', { method: 'POST', headers: { 'x-goog-api-key': process.env.GEMINI_API_KEY, 'content-type': 'application/json' }, body: JSON.stringify(body), signal: signal || AbortSignal.timeout(120000) });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw explainGemini(r.status, data);
+  return data;
+}
+function explainGemini(status, body) {
+  const said = String(body?.error?.message || body?.error || `HTTP ${status}`).replace(/AIza[\w-]+/g, '[key]').slice(0, 300);
+  const msg = status === 429 || /quota|exhausted/i.test(said) ? `Gemini's limit is used up for now, so it can't control the screen (Google said: ${said}).`
+    : status === 400 && /api key/i.test(said) || status === 401 || status === 403 ? `Google rejected the Gemini key or it can't use screen control (${said}). Check GEMINI_API_KEY in the configuration file.`
+    : `Gemini returned an error (${status}): ${said}`;
+  lastError = { at: new Date().toISOString(), engine: 'gemini', model: GEMINI_MODEL(), status, message: msg };
+  return Object.assign(new Error(msg), { setup: [400, 401, 403, 404, 429].includes(status) });
+}
+const geminiTools = () => [{ type: 'computer_use', environment: 'desktop', enable_prompt_injection_detection: true }, ASK_FN];
+// One Gemini action -> one or more of our actions. g = screenshot size, to turn 0-999 into screenshot pixels.
+function translateGemini(name, a, g) {
+  const p = (x, y) => [Math.round((Number(x) / 1000) * g.sw), Math.round((Number(y) / 1000) * g.sh)];
+  const at = a.x != null ? p(a.x, a.y) : undefined;
+  switch (name) {
+    case 'click': return [['left_click', { coordinate: at }]];
+    case 'double_click': case 'triple_click': case 'middle_click': case 'right_click': return [[name, { coordinate: at }]];
+    case 'move': return [['mouse_move', { coordinate: at }]];
+    case 'mouse_down': return [...(at ? [['mouse_move', { coordinate: at }]] : []), ['left_mouse_down', {}]];
+    case 'mouse_up': return [...(at ? [['mouse_move', { coordinate: at }]] : []), ['left_mouse_up', {}]];
+    case 'type': return [['type', { text: a.text }], ...(a.press_enter ? [['key', { text: 'return' }]] : [])];
+    case 'drag_and_drop': return [['left_click_drag', { start_coordinate: p(a.start_x, a.start_y), coordinate: p(a.end_x, a.end_y) }]];
+    case 'wait': return [['wait', { duration: Number(a.seconds) || 1 }]];
+    case 'press_key': return [['key', { text: keyName(a.key) }]];
+    case 'hotkey': return [['key', { text: (a.keys || []).map(keyName).join('+') }]];
+    case 'scroll': return [['scroll', { coordinate: at, scroll_direction: a.direction || 'down', scroll_amount: Math.max(1, Math.round((Number(a.magnitude_in_pixels) || 300) / 100)) }]];
+    case 'take_screenshot': return [];
+    default: throw new Error(`The ${name} action is not supported on this PC; use hotkey or press_key instead.`);
+  }
+}
+async function runGemini(ctx) {
+  const { me, log } = ctx;
+  const fresh = async () => { const [t, img] = await intro(ctx, (data) => ({ type: 'image', data, mime_type: 'image/png' })); return [{ type: 'text', ...t }, img]; };
+  let input = await fresh(), prev = null, turns = 0;
+  for (;;) {
+    if (me.stopped) return STOPPED;
+    if (me.step >= MAX_ACTIONS || Date.now() - me.started > MAX_MINUTES * 60000) return TOO_LONG;
+    if (turns && turns % TURNS_PER_CHAPTER === 0) { input = await fresh(); prev = null; }
+    turns++;
+    ctx.update(me.step ? me.note : 'Thinking');
+    let r;
+    // tools and system_instruction belong to each interaction, so they are sent every turn
+    try { r = await gemini({ model: GEMINI_MODEL(), system_instruction: SYSTEM, tools: geminiTools(), input, ...(prev ? { previous_interaction_id: prev } : {}) }, me.abort.signal); }
+    catch (e) { if (me.stopped) return STOPPED; throw e.setup !== undefined ? e : explainGemini(0, { error: { message: e.message } }); }
+    prev = r.id;
+    const steps = r.steps || [];
+    const answered = new Set(steps.filter((s) => s.type === 'function_result').map((s) => s.call_id));
+    const calls = steps.filter((s) => s.type === 'function_call' && !answered.has(s.id));
+    const said = steps.filter((s) => s.type === 'model_output').flatMap((s) => s.content || []).filter((c) => c.type === 'text').map((c) => c.text).join(' ').trim();
+    if (said) log.push(`(you noted) ${said.slice(0, 200)}`);
+    if (!calls.length) return said || 'Done.';
+    input = [];
+    const g = await screen.geometry();
+    let failed = false;
+    for (const c of calls) {
+      const a = c.arguments || {}, base = { type: 'function_result', name: c.name, call_id: c.id };
+      if (me.stopped) return STOPPED;
+      if (c.name === 'ask_permission') { input.push({ ...base, result: (await confirm(ctx, a.action)) ? 'allowed' : DENIED }); continue; }
+      const info = {};
+      // Gemini's own safety check: some steps need the user's explicit OK first.
+      if (a.safety_decision?.decision === 'require_confirmation') {
+        if (!(await confirm(ctx, `${a.intent || c.name} (Gemini asked to check: ${a.safety_decision.explanation || 'this step'})`))) return 'I stopped because Gemini wanted your OK for a step and you did not approve it.';
+        info.safety_acknowledgement = true;
+      }
+      if (failed) { input.push({ ...base, is_error: true, result: [{ type: 'text', text: JSON.stringify({ error: 'Not executed: an earlier action in this turn failed.' }) }] }); continue; }
+      try { for (const [n, i] of translateGemini(c.name, a, g)) await doAction(ctx, n, i); }
+      catch (err) { failed = true; info.error = err.message; }
+      input.push({ ...base, ...(info.error ? { is_error: true } : {}), result: [{ type: 'text', text: JSON.stringify({ ok: !info.error, ...info }) }] });
+    }
+    // the screen after this turn's actions, attached to the last result
+    const last = [...input].reverse().find((x) => Array.isArray(x.result));
+    if (last) last.result.push({ type: 'image', data: await screen.screenshot(), mime_type: 'image/png' });
+  }
+}
+
+module.exports = { run, stop, state, check, SYSTEM, translate, translateGemini };

@@ -18,9 +18,9 @@
     const CB = [['gemini', 'Gemini', '✦', 'fastest'], ['claude', 'Claude', '✳', 'smartest'], ['chatgpt', 'ChatGPT', '❂', 'OpenAI']];
     $('#chatbrain').innerHTML = CB.map(([k, l, i, s]) => `<button class="tile${prefs.chatBrain === k ? ' on' : ''}" data-chatbrain="${k}" ${have[k] ? '' : 'disabled title="Add the API key first"'}><span>${i}</span>${l}<small>${have[k] ? s : 'needs a key'}</small></button>`).join('');
     $$('[data-chatbrain]').forEach((b) => (b.onclick = async () => { await post('/api/preferences', { chatBrain: b.dataset.chatbrain }); toast(`${b.dataset.chatbrain === 'chatgpt' ? 'ChatGPT' : b.dataset.chatbrain[0].toUpperCase() + b.dataset.chatbrain.slice(1)} answers now`); load(); }));
-    const SE = [['claude', 'Claude', '✳', 'most accurate'], ['chatgpt', 'ChatGPT', '❂', 'OpenAI']];
+    const SE = [['claude', 'Claude', '✳', 'most accurate'], ['chatgpt', 'ChatGPT', '❂', 'OpenAI'], ['gemini', 'Gemini', '✦', 'Google']];
     $('#screenengine').innerHTML = SE.map(([k, l, i, s]) => `<button class="tile${prefs.screenEngine === k ? ' on' : ''}" data-screen="${k}" ${have[k] ? '' : 'disabled title="Add the API key first"'}><span>${i}</span>${l}<small>${have[k] ? s : 'needs a key'}</small></button>`).join('');
-    $$('[data-screen]').forEach((b) => (b.onclick = async () => { await post('/api/preferences', { screenEngine: b.dataset.screen }); toast(`${b.dataset.screen === 'chatgpt' ? 'ChatGPT' : 'Claude'} controls the screen now`); load(); }));
+    $$('[data-screen]').forEach((b) => (b.onclick = async () => { await post('/api/preferences', { screenEngine: b.dataset.screen }); toast(`${{ claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini' }[b.dataset.screen]} controls the screen now`); load(); }));
     const SV = [['gemini', 'Gemini', '✦', 'your chosen Gemini voice'], ['openai', 'ChatGPT', '❂', 'OpenAI voice']];
     $('#speakvoice').innerHTML = SV.map(([k, l, i, s]) => { const ok = k === 'openai' ? have.chatgpt : have.gemini; return `<button class="tile${prefs.speakVoice === k ? ' on' : ''}" data-speak="${k}" ${ok ? '' : 'disabled title="Add the API key first"'}><span>${i}</span>${l}<small>${ok ? s : 'needs a key'}</small></button>`; }).join('');
     $$('[data-speak]').forEach((b) => (b.onclick = async () => { await post('/api/preferences', { speakVoice: b.dataset.speak }); toast(`${b.dataset.speak === 'openai' ? 'ChatGPT' : 'Gemini'} voice speaks now`); load(); }));
@@ -113,7 +113,7 @@
 
   $('#screencheck').onclick = async (e) => {
     e.preventDefault(); $('#screencheckout').textContent = 'Checking…';
-    try { const r = await post('/api/screen/check'); $('#screencheckout').textContent = ['claude', 'chatgpt'].map((k) => `${k === 'claude' ? 'Claude' : 'ChatGPT'}: ${r[k]?.ok ? 'ready' : r[k]?.message || 'not set up'}`).join(' · '); }
+    try { const r = await post('/api/screen/check'); $('#screencheckout').textContent = ['claude', 'chatgpt', 'gemini'].map((k) => `${{ claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini' }[k]}: ${r[k]?.ok ? 'ready' : r[k]?.message || 'not set up'}`).join(' · '); }
     catch (err) { $('#screencheckout').textContent = err.message; }
   };
 
