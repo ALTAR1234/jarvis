@@ -211,3 +211,5 @@ body.docking .main-area{grid-column:1/-1}
 .dock-arrow[hidden]{display:none}.dock-arrow:disabled{opacity:.2;cursor:default}.dock-arrow:not(:disabled):hover{color:#9fe8ff}
 .dock.fade-l{-webkit-mask-image:linear-gradient(90deg,transparent,#000 28px)}.dock.fade-r{-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent)}
 .dock.fade-l.fade-r{-webkit-mask-image:linear-gradient(90deg,transparent,#000 28px,#000 calc(100% - 28px),transparent)}
+
+.stop-button{display:none;flex:none;margin-right:10px;height:38px;padding:0 14px;border:1px solid #ff6a7d;border-radius:19px;background:#2a0b14;color:#ffc2cb;font:inherit;font-size:13px;letter-spacing:.5px;cursor:pointer;box-shadow:0 0 12px #ff3b5a40}.stop-button:hover{background:#3d0f1c}body[data-state="thinking"] .stop-button,body[data-state="speaking"] .stop-button{display:block;animation:stop-in .18s ease-out}@keyframes stop-in{from{opacity:0;transform:scale(.9)}}

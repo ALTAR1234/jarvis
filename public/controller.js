@@ -15,6 +15,12 @@
     $('#brains').innerHTML = B.map(([k, l, i, s]) => `<button class="tile${state.brain === k ? ' on' : ''}" data-brain="${k}" ${ready(k) ? '' : 'disabled title="Add the API key first"'}><span>${i}</span>${l}<small>${ready(k) ? s : 'needs a key'}</small></button>`).join('');
     $$('[data-brain]').forEach((b) => (b.onclick = async () => { await post('/api/preferences', { brain: b.dataset.brain }); toast(`Using ${b.textContent.trim().split(/\s{2,}/)[0]}`); load(); }));
     const prefs = await get('/api/preferences');
+    const CB = [['gemini', 'Gemini', '✦', 'fastest'], ['claude', 'Claude', '✳', 'smartest'], ['chatgpt', 'ChatGPT', '❂', 'OpenAI']];
+    $('#chatbrain').innerHTML = CB.map(([k, l, i, s]) => `<button class="tile${prefs.chatBrain === k ? ' on' : ''}" data-chatbrain="${k}" ${have[k] ? '' : 'disabled title="Add the API key first"'}><span>${i}</span>${l}<small>${have[k] ? s : 'needs a key'}</small></button>`).join('');
+    $$('[data-chatbrain]').forEach((b) => (b.onclick = async () => { await post('/api/preferences', { chatBrain: b.dataset.chatbrain }); toast(`${b.dataset.chatbrain === 'chatgpt' ? 'ChatGPT' : b.dataset.chatbrain[0].toUpperCase() + b.dataset.chatbrain.slice(1)} answers now`); load(); }));
+    const SV = [['gemini', 'Gemini', '✦', 'your chosen Gemini voice'], ['openai', 'ChatGPT', '❂', 'OpenAI voice']];
+    $('#speakvoice').innerHTML = SV.map(([k, l, i, s]) => { const ok = k === 'openai' ? have.chatgpt : have.gemini; return `<button class="tile${prefs.speakVoice === k ? ' on' : ''}" data-speak="${k}" ${ok ? '' : 'disabled title="Add the API key first"'}><span>${i}</span>${l}<small>${ok ? s : 'needs a key'}</small></button>`; }).join('');
+    $$('[data-speak]').forEach((b) => (b.onclick = async () => { await post('/api/preferences', { speakVoice: b.dataset.speak }); toast(`${b.dataset.speak === 'openai' ? 'ChatGPT' : 'Gemini'} voice speaks now`); load(); }));
     const pick = prefs.liveVoice === false ? 'regular' : prefs.liveEngine || 'gemini';
     $$('[data-live]').forEach((b) => { b.classList.toggle('on', (b.dataset.engine || 'regular') === pick); if (b.dataset.engine === 'chatgpt' && !state.brains?.chatgpt) { b.disabled = true; b.title = 'Add OPENAI_API_KEY first'; } });
     const lk = await get('/api/locker');

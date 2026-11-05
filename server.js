@@ -129,11 +129,24 @@ async function withBackup(kind, backup, gemini, other) {
   }
   return other(backup);
 }
+const otherReply = async (b, messages, opts) => ({
+  value: await (b === 'claude' ? brains.chatClaude : brains.chatChatGPT)(messages, { system: contextPrompt(opts.voice, opts.timeZone), tools: tools.declarations(), execute: tools.execute, voice: opts.voice }),
+  via: b === 'claude' ? 'Claude' : 'ChatGPT'
+});
 async function createReply(messages, opts) {
-  return withBackup('chat', backupBrain(), () => createGeminiReply(messages, opts), async (b) => ({
-    value: await (b === 'claude' ? brains.chatClaude : brains.chatChatGPT)(messages, { system: contextPrompt(opts.voice, opts.timeZone), tools: tools.declarations(), execute: tools.execute, voice: opts.voice }),
-    via: b === 'claude' ? 'Claude' : 'ChatGPT'
-  }));
+  // The chat brain the user picked answers first; if it fails, Gemini, then whichever other brain has a key.
+  const pick = readPreferences().chatBrain, have = brains.available();
+  if (pick !== 'gemini' && have[pick]) {
+    try { return await otherReply(pick, messages, opts); }
+    catch (err) {
+      console.warn(`${pick} could not answer, using a backup:`, err.message);
+      const other = pick === 'claude' ? 'chatgpt' : 'claude';
+      if (have.gemini) { try { return { value: await createGeminiReply(messages, opts), via: 'Gemini' }; } catch (e) { if (!have[other]) throw e; } }
+      if (have[other]) return otherReply(other, messages, opts);
+      throw err;
+    }
+  }
+  return withBackup('chat', backupBrain(), () => createGeminiReply(messages, opts), (b) => otherReply(b, messages, opts));
 }
 async function transcribeSpeech(audio, type) {
   if (voiceProvider() === 'fish') return { value: await transcribeWithFish(audio, type), via: 'Fish Audio' };
@@ -147,6 +160,11 @@ async function transcribeSpeech(audio, type) {
 }
 async function synthesizeSpeech(text) {
   if (voiceProvider() === 'fish') return { value: await synthesizeWithFish(text), via: 'Fish Audio' };
+  if (readPreferences().speakVoice === 'openai' && process.env.OPENAI_API_KEY) {
+    try { return { value: await brains.speakOpenAI(text), via: 'OpenAI' }; }
+    catch (err) { if (!process.env.GEMINI_API_KEY) throw err; console.warn('OpenAI speech failed, using Gemini:', err.message); }
+    return { value: await synthesizeWithGemini(text), via: 'Gemini' };
+  }
   return withBackup('voice', backupVoice(), () => synthesizeWithGemini(text), async (b) => (b === 'openai' ? { value: await brains.speakOpenAI(text), via: 'OpenAI' } : { value: await synthesizeWithFish(text), via: 'Fish Audio' }));
 }
 async function createGeminiReply(messages, { voice = false, timeZone } = {}) {
@@ -340,7 +358,7 @@ const PREF_RULES = {
   sleepMinutes: (v) => Number.isInteger(v) && v >= 1 && v <= 60, voiceName: (v) => VOICES.includes(v), fullscreen: (v) => typeof v === 'boolean', avatarStyle: (v) => ['reactor', 'head'].includes(v), appsInside: (v) => typeof v === 'boolean', launchAppsOnStart: (v) => typeof v === 'boolean', dictation: (v) => typeof v === 'boolean', autoDock: (v) => typeof v === 'boolean', hideTaskbar: (v) => typeof v === 'boolean',
   userName: (v) => typeof v === 'string' && v.length <= 40, homeCity: (v) => typeof v === 'string' && v.length <= 80, newsTopics: (v) => typeof v === 'string' && v.length <= 160,
   briefingOnStart: (v) => typeof v === 'boolean', lastBriefingAt: (v) => Number.isFinite(v) && v >= 0,
-  brain: (v) => ['gemini', 'claude', 'chatgpt', 'big'].includes(v), dnd: (v) => typeof v === 'boolean', lockOnStart: (v) => typeof v === 'boolean', lockIdleMinutes: (v) => Number.isInteger(v) && v >= 0 && v <= 240, backupDaily: (v) => typeof v === 'boolean', liveVoice: (v) => typeof v === 'boolean', liveEngine: (v) => ['gemini', 'chatgpt'].includes(v), lastBackupAt: (v) => Number.isFinite(v) && v >= 0
+  brain: (v) => ['gemini', 'claude', 'chatgpt', 'big'].includes(v), dnd: (v) => typeof v === 'boolean', lockOnStart: (v) => typeof v === 'boolean', lockIdleMinutes: (v) => Number.isInteger(v) && v >= 0 && v <= 240, backupDaily: (v) => typeof v === 'boolean', liveVoice: (v) => typeof v === 'boolean', liveEngine: (v) => ['gemini', 'chatgpt'].includes(v), chatBrain: (v) => ['gemini', 'claude', 'chatgpt'].includes(v), speakVoice: (v) => ['gemini', 'openai'].includes(v), lastBackupAt: (v) => Number.isFinite(v) && v >= 0
 };
 function readPreferences() {
   let p = {}; try { p = JSON.parse(fs.readFileSync(preferencesFile(), 'utf8')) || {}; } catch {}
@@ -348,7 +366,7 @@ function readPreferences() {
     sleepMinutes: PREF_RULES.sleepMinutes(p.sleepMinutes) ? p.sleepMinutes : 2, fullscreen: p.fullscreen !== false, avatarStyle: p.avatarStyle === 'head' ? 'head' : 'reactor', appsInside: p.appsInside !== false, launchAppsOnStart: p.launchAppsOnStart !== false, dictation: p.dictation !== false, autoDock: p.autoDock !== false, hideTaskbar: p.hideTaskbar !== false,
     userName: typeof p.userName === 'string' ? p.userName.trim() : '', homeCity: typeof p.homeCity === 'string' ? p.homeCity.trim() : '', newsTopics: typeof p.newsTopics === 'string' ? p.newsTopics.trim() : '',
     briefingOnStart: p.briefingOnStart !== false, lastBriefingAt: Number.isFinite(p.lastBriefingAt) ? p.lastBriefingAt : 0,
-    brain: PREF_RULES.brain(p.brain) ? p.brain : 'gemini', dnd: p.dnd === true, lockOnStart: p.lockOnStart === true, lockIdleMinutes: PREF_RULES.lockIdleMinutes(p.lockIdleMinutes) ? p.lockIdleMinutes : 0, backupDaily: p.backupDaily !== false, liveVoice: p.liveVoice !== false, liveEngine: p.liveEngine === 'chatgpt' ? 'chatgpt' : 'gemini', lastBackupAt: Number.isFinite(p.lastBackupAt) ? p.lastBackupAt : 0, voiceName: PREF_RULES.voiceName(p.voiceName) ? p.voiceName : null, voices: VOICES };
+    brain: PREF_RULES.brain(p.brain) ? p.brain : 'gemini', dnd: p.dnd === true, lockOnStart: p.lockOnStart === true, lockIdleMinutes: PREF_RULES.lockIdleMinutes(p.lockIdleMinutes) ? p.lockIdleMinutes : 0, backupDaily: p.backupDaily !== false, liveVoice: p.liveVoice !== false, liveEngine: p.liveEngine === 'chatgpt' ? 'chatgpt' : 'gemini', chatBrain: PREF_RULES.chatBrain(p.chatBrain) ? p.chatBrain : 'gemini', speakVoice: p.speakVoice === 'openai' ? 'openai' : 'gemini', lastBackupAt: Number.isFinite(p.lastBackupAt) ? p.lastBackupAt : 0, voiceName: PREF_RULES.voiceName(p.voiceName) ? p.voiceName : null, voices: VOICES };
 }
 function currentVoice() {
   const pref = readPreferences().voiceName; if (pref) return pref;

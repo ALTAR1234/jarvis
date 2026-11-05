@@ -28,7 +28,7 @@ const avatar = window.JarvisAvatar ? new window.JarvisAvatar($('avatar')) : null
 const micActive = () => handsFreeEnabled || live.on;
 let micStream = null, audioContext = null, analyser = null, sourceNode = null, vadFrame = 0;
 let recorder = null, recordingChunks = [], recordingTimer = null, lastSpeechAt = 0, speechFrames = 0, noiseFloor = 0.004;
-let currentAudio = null, currentAudioUrl = null, toastTimer;
+let currentAudio = null, currentAudioUrl = null, toastTimer, replyAbort = null;
 
 function updateState(next) {
   if ((live.asleep || regularAsleep()) && ['idle', 'listening'].includes(next)) next = 'asleep';
@@ -89,15 +89,18 @@ async function sendMessage(text, { voice = false } = {}) {
   while (messages.length > 20) messages.shift();
   input.value = ''; busy = true; send.disabled = true; updateState('thinking');
   const pending = addMessage('assistant', 'Thinking…', 'pending');
+  const ctl = replyAbort = new AbortController();
   try {
-    const response = await fetch('/api/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ messages, voice, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }) });
+    const response = await fetch('/api/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ messages, voice, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }), signal: ctl.signal });
     const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error || `Request failed (${response.status}).`);
     if (typeof data.reply !== 'string' || !data.reply.trim()) throw new Error('Gemini returned an empty reply. Try again.');
     noteVia('chat', data.via);
     pending.textContent = data.reply; pending.classList.remove('pending'); messages.push({ role: 'assistant', content: data.reply });
     if (voiceOn) await speak(data.reply); else updateState('idle');
-  } catch (err) { pending.remove(); addMessage('assistant', err.message || 'Could not reach Gemini. Check the setup and try again.', 'error'); messages.pop(); updateState('error'); setTimeout(() => updateState('idle'), 2000); }
-  finally { busy = false; send.disabled = false; input.focus(); if (document.body.dataset.state === 'thinking') updateState('idle'); }
+  } catch (err) {
+    if (ctl.signal.aborted) { pending.remove(); messages.pop(); updateState('idle'); return; }
+    pending.remove(); addMessage('assistant', err.message || 'Could not reach Gemini. Check the setup and try again.', 'error'); messages.pop(); updateState('error'); setTimeout(() => updateState('idle'), 2000); }
+  finally { if (replyAbort === ctl) replyAbort = null; busy = false; send.disabled = false; input.focus(); if (document.body.dataset.state === 'thinking') updateState('idle'); }
 }
 form.addEventListener('submit', (event) => { event.preventDefault(); if (live.on) live.sendText(input.value); else sendMessage(input.value); });
 document.querySelectorAll('.quick').forEach((button) => button.addEventListener('click', () => { input.value = button.dataset.prompt || ''; input.focus(); input.setSelectionRange(input.value.length, input.value.length); }));
@@ -216,14 +219,22 @@ async function speak(text) {
   text = speakable(text); if (!text) { updateState('idle'); return; }
   updateState('thinking');
   try {
-    const response = await fetch('/api/voice/tts', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
+    const response = await fetch('/api/voice/tts', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }), signal: replyAbort?.signal });
     if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.error || 'Could not create the spoken reply.'); }
     noteVia('voice', response.headers.get('x-jarvis-via')); const audioBlob = await response.blob(); if (currentAudio) currentAudio.pause(); if (currentAudioUrl) URL.revokeObjectURL(currentAudioUrl);
     currentAudioUrl = URL.createObjectURL(audioBlob); currentAudio = new Audio(currentAudioUrl);
     currentAudio.onplay = () => updateState('speaking'); currentAudio.onended = () => updateState('idle'); currentAudio.onerror = () => { updateState('error'); showToast('The spoken reply could not be played.'); setTimeout(() => updateState('idle'), 1800); };
     await currentAudio.play();
-  } catch (err) { updateState('idle'); showToast(err.message || 'Speech synthesis failed.'); }
+  } catch (err) { updateState('idle'); if (err.name !== 'AbortError') showToast(err.message || 'Speech synthesis failed.'); }
 }
+// Interrupt: stop whatever J.A.R.V.I.S. is thinking or saying, and go straight back to listening.
+function interrupt() {
+  if (live.on) live.skipReply();
+  replyAbort?.abort(); replyAbort = null;
+  if (currentAudio && !currentAudio.paused) currentAudio.pause();
+  updateState('idle');
+}
+$('stopButton').addEventListener('click', interrupt);
 // Live conversation over the local Gemini Live bridge: streams 16 kHz mic audio while speech is detected,
 // plays 24 kHz reply audio gaplessly, shows both transcripts, and supports barge-in. After a quiet spell it
 // sleeps (connection closed, mic stays local) and wakes when it hears "Jarvis", Ctrl+Space, or Ctrl+Shift+J.
@@ -535,7 +546,7 @@ mic.addEventListener('click', async () => {
   else live.stop();
 });
 voiceToggle.addEventListener('click', () => { setVoiceReplies(!voiceOn); live.setMuted(!voiceOn); if (!voiceOn) { if (currentAudio) currentAudio.pause(); updateState('idle'); } });
-document.addEventListener('keydown', (event) => { if (event.key === 'Escape') { stopSpeaking(); live.skipReply(); } });
+document.addEventListener('keydown', (event) => { if (event.key === 'Escape') interrupt(); });
 window.addEventListener('beforeunload', () => { live.stop({ save: false }); cancelAnimationFrame(vadFrame); if (micStream) micStream.getTracks().forEach((track) => track.stop()); if (currentAudio) currentAudio.pause(); if (currentAudioUrl) URL.revokeObjectURL(currentAudioUrl); });
 
 
