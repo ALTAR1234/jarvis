@@ -1,10 +1,12 @@
-// "Control my screen": Claude looks at screenshots and drives the real mouse and keyboard (computer use
-// toolset) until the task is done. One task at a time; the user can stop it any moment, and anything risky
-// (buying, sending, deleting, changing settings) waits for their OK through ask_permission.
+// "Control my screen": Claude or ChatGPT looks at screenshots and drives the real mouse and keyboard until
+// the task is done. One task at a time; the user can stop it any moment, and anything risky (buying,
+// sending, deleting, changing settings) waits for their OK through ask_permission. If the chosen engine
+// can't start (no key, out of credit), the other one takes over.
 const Anthropic = require('@anthropic-ai/sdk');
 const screen = require('./screen');
 
 const MODEL = () => process.env.CLAUDE_SCREEN_MODEL || process.env.CLAUDE_MODEL || 'claude-opus-5-5';
+const OPENAI_MODEL = () => process.env.OPENAI_SCREEN_MODEL || 'gpt-6.1-sol';
 const MAX_ACTIONS = 80, MAX_MINUTES = 15, TURNS_PER_CHAPTER = 14;
 const SYSTEM = `You are J.A.R.V.I.S., the user's assistant, and you are controlling the user's own Windows PC (a real computer, not a sandbox) with the mouse and keyboard to do one task they asked for.
 
@@ -16,21 +18,25 @@ Rules:
 - The J.A.R.V.I.S. window has been minimized for you. Do not close J.A.R.V.I.S.
 - When the task is done, or you cannot finish it, stop calling tools and reply in one or two short spoken-style sentences saying what you did or what is in the way.`;
 
-const ASK = {
-  name: 'ask_permission',
-  description: 'Ask the user to approve one risky step before doing it (buying, sending, posting, deleting, changing settings, installing, accepting terms). Returns "allowed" or "denied".',
-  input_schema: { type: 'object', properties: { action: { type: 'string', description: 'Exactly what you are about to do, in plain words, e.g. "Send the email to Sam with the subject Lunch".' } }, required: ['action'] }
-};
+const ASK_DESC = 'Ask the user to approve one risky step before doing it (buying, sending, posting, deleting, changing settings, installing, accepting terms). Returns "allowed" or "denied".';
+const ASK_PARAMS = { type: 'object', properties: { action: { type: 'string', description: 'Exactly what you are about to do, in plain words, e.g. "Send the email to Sam with the subject Lunch".' } }, required: ['action'] };
+const ASK = { name: 'ask_permission', description: ASK_DESC, input_schema: ASK_PARAMS };
+const ASK_FN = { type: 'function', name: 'ask_permission', description: ASK_DESC, parameters: ASK_PARAMS };
+const STOPPED = 'Stopped. You have control of the screen again.', TOO_LONG = 'I stopped because this was taking too long. You have control again.';
+const DENIED = 'denied: do not do it; find another way or stop and tell the user';
 
 let client = null, current = null;
 const claude = () => (client ||= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 2, timeout: 120000 }));
+const have = { claude: () => Boolean(process.env.ANTHROPIC_API_KEY), chatgpt: () => Boolean(process.env.OPENAI_API_KEY) };
+const NAME = { claude: 'Claude', chatgpt: 'ChatGPT' };
 const describe = (name, a = {}) => {
   const at = a.coordinate ? ` at ${a.coordinate.join(',')}` : '';
   return { screenshot: 'Looking at the screen', zoom: 'Looking closer', type: `Typing "${String(a.text || '').slice(0, 40)}"`, key: `Pressing ${a.text}`, scroll: `Scrolling ${a.scroll_direction}`, wait: 'Waiting',
-    left_click: `Clicking${at}`, double_click: `Double-clicking${at}`, right_click: `Right-clicking${at}`, left_click_drag: 'Dragging', mouse_move: 'Moving the mouse' }[name] || name.replace(/_/g, ' ');
+    left_click: `Clicking${at}`, double_click: `Double-clicking${at}`, right_click: `Right-clicking${at}`, middle_click: `Middle-clicking${at}`, left_click_drag: 'Dragging', mouse_move: 'Moving the mouse' }[name] || name.replace(/_/g, ' ');
 };
+const settle = (name) => (['left_click', 'double_click', 'triple_click', 'right_click', 'middle_click', 'type', 'key', 'scroll', 'left_click_drag'].includes(name) ? new Promise((r) => setTimeout(r, 350)) : null);
 
-// Claude's own words about what went wrong, so the user (and the Controller) can see the real reason.
+// The engine's own words about what went wrong, so the user (and the Controller) can see the real reason.
 let lastError = null;
 function explain(e) {
   const said = String(e?.error?.error?.message || e?.message || e).replace(/sk-ant-[\w-]+/g, '[key]').slice(0, 300);
@@ -40,82 +46,65 @@ function explain(e) {
     : e instanceof Anthropic.RateLimitError ? `Claude is rate-limited or out of credit (${said}).`
     : e instanceof Anthropic.APIError ? `Claude returned an error (${e.status}): ${said}`
     : `Could not reach Claude: ${said}`;
-  lastError = { at: new Date().toISOString(), model: MODEL(), status: e?.status ?? null, message: msg };
-  return new Error(msg);
+  lastError = { at: new Date().toISOString(), engine: 'claude', model: MODEL(), status: e?.status ?? null, message: msg };
+  return Object.assign(new Error(msg), { setup: e instanceof Anthropic.APIError && [400, 401, 403, 404, 429].includes(e.status) });
 }
-// A tiny request with the same model and tools (no screenshot, no control) to check that screen control can run.
-async function check() {
-  if (!process.env.ANTHROPIC_API_KEY) return { ok: false, model: MODEL(), message: 'ANTHROPIC_API_KEY is not set in the configuration file.' };
-  try {
-    const r = await claude().messages.create({ model: MODEL(), max_tokens: 400, output_config: { effort: 'low' }, tools: [{ type: 'computer_toolset_20260801' }, ASK], messages: [{ role: 'user', content: 'This is a connection test. Reply with just OK and do not use any tools.' }] });
-    return { ok: true, model: r.model, stop: r.stop_reason };
-  } catch (e) { return { ok: false, model: MODEL(), message: explain(e).message }; }
+function explainOpenAI(status, body) {
+  const said = String(body?.error?.message || body?.error || `HTTP ${status}`).replace(/sk-[\w-]+/g, '[key]').slice(0, 300);
+  const msg = body?.error?.code === 'insufficient_quota' || /no credits|out of credit/i.test(said) ?`Your OpenAI account is out of credit, so ChatGPT can't control the screen (OpenAI said: ${said}). Add credit at platform.openai.com → Billing, then try again.`
+    : status === 401 ? `OpenAI rejected the API key (${said}). Check OPENAI_API_KEY in the configuration file.`
+    : `ChatGPT returned an error (${status}): ${said}`;
+  lastError = { at: new Date().toISOString(), engine: 'chatgpt', model: OPENAI_MODEL(), status, message: msg };
+  return Object.assign(new Error(msg), { setup: [400, 401, 403, 404, 429].includes(status) });
 }
 
-function state() { return current ? { running: true, task: current.task, step: current.step, note: current.note } : { running: false, lastError }; }
+async function openai(body, signal) {
+  const r = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'content-type': 'application/json' }, body: JSON.stringify(body), signal: signal || AbortSignal.timeout(120000) });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw explainOpenAI(r.status, data);
+  return data;
+}
+
+// Tiny requests with the same models and tools (no screenshot, no control) to check that each engine can run.
+async function check() {
+  const out = {};
+  if (!have.claude()) out.claude = { ok: false, model: MODEL(), message: 'ANTHROPIC_API_KEY is not set.' };
+  else {
+    try { const r = await claude().messages.create({ model: MODEL(), max_tokens: 400, output_config: { effort: 'low' }, tools: [{ type: 'computer_toolset_20260801' }, ASK], messages: [{ role: 'user', content: 'This is a connection test. Reply with just OK and do not use any tools.' }] }); out.claude = { ok: true, model: r.model }; }
+    catch (e) { out.claude = { ok: false, model: MODEL(), message: explain(e).message }; }
+  }
+  if (!have.chatgpt()) out.chatgpt = { ok: false, model: OPENAI_MODEL(), message: 'OPENAI_API_KEY is not set.' };
+  else {
+    try { const r = await openai({ model: OPENAI_MODEL(), tools: [{ type: 'computer' }, ASK_FN], input: 'This is a connection test. Reply with just OK and do not use any tools.' }); out.chatgpt = { ok: true, model: r.model }; }
+    catch (e) { out.chatgpt = { ok: false, model: OPENAI_MODEL(), message: e.message }; }
+  }
+  return out;
+}
+
+function state() { return current ? { running: true, task: current.task, step: current.step, note: current.note, engine: current.engine } : { running: false, lastError }; }
 function stop() { if (current) { current.stopped = true; current.abort.abort(); } return state(); }
 
-// Runs the task; resolves with the final spoken-style sentence. hooks: { confirm(text) -> Promise<bool>, onState(state) }.
+// Runs the task; resolves with the final spoken-style sentence.
+// hooks: { engine: 'claude' | 'chatgpt', confirm(text) -> Promise<bool>, onState(state) }.
 async function run(task, hooks = {}) {
-  if (!process.env.ANTHROPIC_API_KEY) throw new Error('Screen control needs ANTHROPIC_API_KEY in the configuration file.');
   if (current) throw new Error('I am already controlling the screen. Say "stop" or press Ctrl+Alt+X first.');
-  const me = current = { task: String(task).slice(0, 1000), step: 0, note: 'Starting', stopped: false, abort: new AbortController(), started: Date.now() };
-  const update = (note) => { me.note = note; hooks.onState?.(state()); };
-  const log = [];
-  const fresh = async () => [{ role: 'user', content: [
-    { type: 'text', text: `Task: ${me.task}${log.length ? `\n\nYou were already working on this. What you have done so far:\n- ${log.slice(-40).join('\n- ')}\n\nThis is the screen right now; carry on from here.` : '\n\nThis is the screen right now.'}` },
-    { type: 'image', source: { type: 'base64', media_type: 'image/png', data: await screen.screenshot() } }
-  ] }];
+  const first = hooks.engine === 'chatgpt' ? 'chatgpt' : 'claude', order = [first, first === 'claude' ? 'chatgpt' : 'claude'].filter((e) => have[e]());
+  if (!order.length) throw new Error('Screen control needs ANTHROPIC_API_KEY (Claude) or OPENAI_API_KEY (ChatGPT) in the configuration file.');
+  const me = current = { task: String(task).slice(0, 1000), step: 0, note: 'Starting', stopped: false, abort: new AbortController(), started: Date.now(), engine: order[0] };
+  const ctx = { me, log: [], hooks, update: (note) => { me.note = note; hooks.onState?.(state()); } };
   try {
-    update('Looking at the screen');
+    ctx.update('Looking at the screen');
     await new Promise((r) => setTimeout(r, 900)); // let J.A.R.V.I.S. minimize and the banner appear first
-    let messages = await fresh(), turns = 0;
-    for (;;) {
-      if (me.stopped) return 'Stopped. You have control of the screen again.';
-      if (me.step >= MAX_ACTIONS || Date.now() - me.started > MAX_MINUTES * 60000) return 'I stopped because this was taking too long. You have control again.';
-      // Every few turns, start a fresh conversation with a short log and the current screen, so old screenshots don't pile up.
-      if (turns && turns % TURNS_PER_CHAPTER === 0) messages = await fresh();
-      turns++;
-      update(me.step ? me.note : 'Thinking');
-      let response;
-      try {
-        response = await claude().messages.create({ model: MODEL(), max_tokens: 16000, output_config: { effort: 'medium' }, system: SYSTEM, tools: [{ type: 'computer_toolset_20260801' }, ASK], messages }, { signal: me.abort.signal });
-      } catch (e) {
-        if (me.stopped) return 'Stopped. You have control of the screen again.';
-        throw explain(e);
+    for (let i = 0; i < order.length; i++) {
+      me.engine = order[i];
+      try { return await (me.engine === 'claude' ? runClaude : runChatGPT)(ctx); }
+      catch (err) {
+        // Only switch before anything was done on screen, and only for account or setup problems.
+        if (me.stopped) return STOPPED;
+        if (i + 1 >= order.length || me.step > 0 || !err.setup) throw err;
+        console.warn(`${NAME[me.engine]} could not start screen control, trying ${NAME[order[i + 1]]}:`, err.message);
+        ctx.update(`${NAME[order[i + 1]]} is taking over`);
       }
-      messages.push({ role: 'assistant', content: response.content });
-      const said = response.content.filter((b) => b.type === 'text').map((b) => b.text).join(' ').trim();
-      if (said) log.push(`(you noted) ${said.slice(0, 200)}`);
-      if (response.stop_reason === 'refusal') return 'Claude declined to do that on your screen.';
-      if (response.stop_reason === 'pause_turn') continue;
-      const calls = response.content.filter((b) => b.type === 'tool_use');
-      if (!calls.length) return said || 'Done.';
-      const results = [];
-      let failed = false;
-      for (const c of calls) {
-        const base = { type: 'tool_result', tool_use_id: c.id, ...(c.toolset_name ? { toolset_name: c.toolset_name } : {}) };
-        if (me.stopped) { results.push({ ...base, content: 'Not executed: the user stopped screen control.', is_error: true }); continue; }
-        if (failed) { results.push({ ...base, content: 'Not executed: an earlier computer action in this turn failed.', is_error: true }); continue; }
-        if (c.name === 'ask_permission') {
-          update(`Asking: ${c.input?.action}`);
-          const ok = hooks.confirm ? await hooks.confirm(String(c.input?.action || 'a risky step')) : false;
-          log.push(`asked "${c.input?.action}" -> ${ok ? 'allowed' : 'denied'}`);
-          results.push({ ...base, content: ok ? 'allowed' : 'denied: do not do it; find another way or stop and tell the user' });
-          continue;
-        }
-        me.step++; update(describe(c.name, c.input));
-        try {
-          const out = await screen.act(c.name, c.input || {});
-          if (!['screenshot', 'zoom', 'cursor_position', 'wait'].includes(c.name)) log.push(describe(c.name, c.input));
-          if (['left_click', 'double_click', 'triple_click', 'right_click', 'type', 'key', 'scroll', 'left_click_drag'].includes(c.name)) await new Promise((r) => setTimeout(r, 350)); // let the screen react
-          results.push({ ...base, content: out.image ? [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: out.image } }] : [{ type: 'text', text: out }] });
-        } catch (err) {
-          failed = true;
-          results.push({ ...base, content: `Error: ${err.message}`, is_error: true });
-        }
-      }
-      messages.push({ role: 'user', content: results });
     }
   } finally {
     current = null;
@@ -123,4 +112,139 @@ async function run(task, hooks = {}) {
   }
 }
 
-module.exports = { run, stop, state, check, SYSTEM };
+const intro = async (ctx, imageBlock) => [
+  { text: `Task: ${ctx.me.task}${ctx.log.length ? `\n\nYou were already working on this. What you have done so far:\n- ${ctx.log.slice(-40).join('\n- ')}\n\nThis is the screen right now; carry on from here.` : '\n\nThis is the screen right now.'}` },
+  imageBlock(await screen.screenshot())
+];
+async function confirm(ctx, action) {
+  ctx.update(`Asking: ${action}`);
+  const ok = ctx.hooks.confirm ? await ctx.hooks.confirm(String(action || 'a risky step')) : false;
+  ctx.log.push(`asked "${action}" -> ${ok ? 'allowed' : 'denied'}`);
+  return ok;
+}
+// Runs one action; keeps the log and the banner current.
+async function doAction(ctx, name, input) {
+  ctx.me.step++; ctx.update(describe(name, input));
+  const out = await screen.act(name, input);
+  if (!['screenshot', 'zoom', 'cursor_position', 'wait'].includes(name)) ctx.log.push(describe(name, input));
+  await settle(name);
+  return out;
+}
+
+// ---- Claude: computer use toolset ----
+async function runClaude(ctx) {
+  const { me, log } = ctx;
+  const fresh = async () => { const [t, img] = await intro(ctx, (data) => ({ type: 'image', source: { type: 'base64', media_type: 'image/png', data } })); return [{ role: 'user', content: [{ type: 'text', ...t }, img] }]; };
+  let messages = await fresh(), turns = 0;
+  for (;;) {
+    if (me.stopped) return STOPPED;
+    if (me.step >= MAX_ACTIONS || Date.now() - me.started > MAX_MINUTES * 60000) return TOO_LONG;
+    // Every few turns, start a fresh conversation with a short log and the current screen, so old screenshots don't pile up.
+    if (turns && turns % TURNS_PER_CHAPTER === 0) messages = await fresh();
+    turns++;
+    ctx.update(me.step ? me.note : 'Thinking');
+    let response;
+    try {
+      response = await claude().messages.create({ model: MODEL(), max_tokens: 16000, output_config: { effort: 'medium' }, system: SYSTEM, tools: [{ type: 'computer_toolset_20260801' }, ASK], messages }, { signal: me.abort.signal });
+    } catch (e) {
+      if (me.stopped) return STOPPED;
+      throw explain(e);
+    }
+    messages.push({ role: 'assistant', content: response.content });
+    const said = response.content.filter((b) => b.type === 'text').map((b) => b.text).join(' ').trim();
+    if (said) log.push(`(you noted) ${said.slice(0, 200)}`);
+    if (response.stop_reason === 'refusal') return 'Claude declined to do that on your screen.';
+    if (response.stop_reason === 'pause_turn') continue;
+    const calls = response.content.filter((b) => b.type === 'tool_use');
+    if (!calls.length) return said || 'Done.';
+    const results = [];
+    let failed = false;
+    for (const c of calls) {
+      const base = { type: 'tool_result', tool_use_id: c.id, ...(c.toolset_name ? { toolset_name: c.toolset_name } : {}) };
+      if (me.stopped) { results.push({ ...base, content: 'Not executed: the user stopped screen control.', is_error: true }); continue; }
+      if (failed) { results.push({ ...base, content: 'Not executed: an earlier computer action in this turn failed.', is_error: true }); continue; }
+      if (c.name === 'ask_permission') { results.push({ ...base, content: (await confirm(ctx, c.input?.action)) ? 'allowed' : DENIED }); continue; }
+      try {
+        const out = await doAction(ctx, c.name, c.input || {});
+        results.push({ ...base, content: out.image ? [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: out.image } }] : [{ type: 'text', text: out }] });
+      } catch (err) {
+        failed = true;
+        results.push({ ...base, content: `Error: ${err.message}`, is_error: true });
+      }
+    }
+    messages.push({ role: 'user', content: results });
+  }
+}
+
+// ---- ChatGPT: Responses API computer tool (batched actions, a screenshot back after each batch) ----
+const OPENAI_KEYS = { arrowleft: 'left', arrowright: 'right', arrowup: 'up', arrowdown: 'down', enter: 'return', esc: 'escape', meta: 'super', cmd: 'super', command: 'super', option: 'alt' };
+const keyName = (k) => OPENAI_KEYS[String(k).toLowerCase()] || String(k).toLowerCase();
+const mods = (keys) => (Array.isArray(keys) && keys.length ? keys.map(keyName).join('+') : undefined);
+const xy = (p) => (Array.isArray(p) ? p : [p?.x, p?.y]);
+// One OpenAI action -> one of our actions (same names Claude uses).
+function translate(a) {
+  const at = [a.x, a.y];
+  switch (a.type) {
+    case 'click': {
+      const button = { left: 'left_click', right: 'right_click', wheel: 'middle_click', middle: 'middle_click' }[a.button || 'left'];
+      if (!button) throw new Error(`The ${a.button} mouse button is not supported.`);
+      return [button, { coordinate: at, text: mods(a.keys) }];
+    }
+    case 'double_click': return ['double_click', { coordinate: at, text: mods(a.keys) }];
+    case 'move': return ['mouse_move', { coordinate: at }];
+    case 'drag': { const path = a.path || []; return ['left_click_drag', { start_coordinate: xy(path[0]), coordinate: xy(path[path.length - 1]), text: mods(a.keys) }]; }
+    case 'scroll': {
+      const vertical = Math.abs(a.scroll_y || 0) >= Math.abs(a.scroll_x || 0), amount = Math.abs(vertical ? a.scroll_y : a.scroll_x) || 100;
+      return ['scroll', { coordinate: at, scroll_direction: vertical ? (a.scroll_y > 0 ? 'down' : 'up') : (a.scroll_x > 0 ? 'right' : 'left'), scroll_amount: Math.max(1, Math.round(amount / 100)), text: mods(a.keys) }];
+    }
+    case 'keypress': return ['key', { text: (a.keys || []).map(keyName).join('+') }];
+    case 'type': return ['type', { text: a.text }];
+    case 'wait': return ['wait', { duration: 1 }];
+    case 'screenshot': return null;
+    default: throw new Error(`Unsupported action ${a.type}.`);
+  }
+}
+async function runChatGPT(ctx) {
+  const { me, log } = ctx;
+  const shot = (b64) => `data:image/png;base64,${b64}`;
+  const fresh = async () => { const [t, img] = await intro(ctx, (b64) => ({ type: 'input_image', image_url: shot(b64), detail: 'original' })); return [{ role: 'user', content: [{ type: 'input_text', ...t }, img] }]; };
+  let input = await fresh(), prev = null, turns = 0;
+  for (;;) {
+    if (me.stopped) return STOPPED;
+    if (me.step >= MAX_ACTIONS || Date.now() - me.started > MAX_MINUTES * 60000) return TOO_LONG;
+    if (turns && turns % TURNS_PER_CHAPTER === 0) { input = await fresh(); prev = null; }
+    turns++;
+    ctx.update(me.step ? me.note : 'Thinking');
+    let r;
+    try { r = await openai({ model: OPENAI_MODEL(), instructions: SYSTEM, tools: [{ type: 'computer' }, ASK_FN], input, ...(prev ? { previous_response_id: prev } : {}) }, me.abort.signal); }
+    catch (e) { if (me.stopped) return STOPPED; throw e.setup !== undefined ? e : explainOpenAI(0, { error: { message: e.message } }); }
+    prev = r.id;
+    const items = r.output || [];
+    const said = items.filter((o) => o.type === 'message').flatMap((o) => o.content || []).filter((c) => c.type === 'output_text').map((c) => c.text).join(' ').trim();
+    if (said) log.push(`(you noted) ${said.slice(0, 200)}`);
+    const fcalls = items.filter((o) => o.type === 'function_call'), calls = items.filter((o) => o.type === 'computer_call');
+    if (!fcalls.length && !calls.length) return said || 'Done.';
+    input = [];
+    for (const f of fcalls) {
+      let args = {}; try { args = JSON.parse(f.arguments || '{}'); } catch {}
+      input.push({ type: 'function_call_output', call_id: f.call_id, output: f.name === 'ask_permission' ? ((await confirm(ctx, args.action)) ? 'allowed' : DENIED) : `Unknown function ${f.name}.` });
+    }
+    for (const c of calls) {
+      if (me.stopped) return STOPPED;
+      // OpenAI's own safety checks (e.g. a suspicious page) need the user's explicit OK before anything runs.
+      const checks = c.pending_safety_checks || [];
+      for (const s of checks) if (!(await confirm(ctx, `continue even though ChatGPT flagged: ${s.message || s.code}`))) return 'I stopped because ChatGPT flagged something on screen and you did not approve continuing.';
+      const actions = c.actions || (c.action ? [c.action] : []);
+      let error = null;
+      for (const a of actions) {
+        if (me.stopped) return STOPPED;
+        try { const t = translate(a); if (t) await doAction(ctx, t[0], t[1]); }
+        catch (err) { error = err.message; break; }
+      }
+      if (error) log.push(`(error) ${error}`);
+      input.push({ type: 'computer_call_output', call_id: c.call_id, output: { type: 'computer_screenshot', image_url: shot(await screen.screenshot()), detail: 'original' }, ...(checks.length ? { acknowledged_safety_checks: checks } : {}) });
+    }
+  }
+}
+
+module.exports = { run, stop, state, check, SYSTEM, translate };

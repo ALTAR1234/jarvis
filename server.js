@@ -18,10 +18,10 @@ const screenagent = require('./core/screenagent');
 
 // "Control my screen" runs in the background; the banner (main.cjs) and the HUD follow it through 'screen' events.
 function startScreenTask(task) {
-  if (!process.env.ANTHROPIC_API_KEY) throw new Error('Screen control uses Claude. Add ANTHROPIC_API_KEY to the configuration file first.');
+  if (!process.env.ANTHROPIC_API_KEY && !process.env.OPENAI_API_KEY) throw new Error('Screen control uses Claude or ChatGPT. Add ANTHROPIC_API_KEY or OPENAI_API_KEY to the configuration file first.');
   if (screenagent.state().running) throw new Error('I am already controlling the screen. Say "stop controlling my screen" or press Ctrl+Alt+X first.');
   const publish = (s) => { store.emit('screen', s); globalThis.jarvisScreenControl?.(s); };
-  screenagent.run(task, { confirm: (action) => store.requestConfirm({ tool: 'control_screen', summary: action }), onState: publish })
+  screenagent.run(task, { engine: readPreferences().screenEngine, confirm: (action) => store.requestConfirm({ tool: 'control_screen', summary: action }), onState: publish })
     .then((text) => publish({ running: false, done: true, text }))
     .catch((err) => publish({ running: false, done: true, error: true, text: `I had to stop: ${err.message}` }));
 }
@@ -369,7 +369,7 @@ const PREF_RULES = {
   sleepMinutes: (v) => Number.isInteger(v) && v >= 1 && v <= 60, voiceName: (v) => VOICES.includes(v), fullscreen: (v) => typeof v === 'boolean', avatarStyle: (v) => ['reactor', 'head'].includes(v), appsInside: (v) => typeof v === 'boolean', launchAppsOnStart: (v) => typeof v === 'boolean', dictation: (v) => typeof v === 'boolean', autoDock: (v) => typeof v === 'boolean', hideTaskbar: (v) => typeof v === 'boolean',
   userName: (v) => typeof v === 'string' && v.length <= 40, homeCity: (v) => typeof v === 'string' && v.length <= 80, newsTopics: (v) => typeof v === 'string' && v.length <= 160,
   briefingOnStart: (v) => typeof v === 'boolean', lastBriefingAt: (v) => Number.isFinite(v) && v >= 0,
-  brain: (v) => ['gemini', 'claude', 'chatgpt', 'big'].includes(v), dnd: (v) => typeof v === 'boolean', lockOnStart: (v) => typeof v === 'boolean', lockIdleMinutes: (v) => Number.isInteger(v) && v >= 0 && v <= 240, backupDaily: (v) => typeof v === 'boolean', liveVoice: (v) => typeof v === 'boolean', liveEngine: (v) => ['gemini', 'chatgpt'].includes(v), chatBrain: (v) => ['gemini', 'claude', 'chatgpt'].includes(v), speakVoice: (v) => ['gemini', 'openai'].includes(v), lastBackupAt: (v) => Number.isFinite(v) && v >= 0
+  brain: (v) => ['gemini', 'claude', 'chatgpt', 'big'].includes(v), dnd: (v) => typeof v === 'boolean', lockOnStart: (v) => typeof v === 'boolean', lockIdleMinutes: (v) => Number.isInteger(v) && v >= 0 && v <= 240, backupDaily: (v) => typeof v === 'boolean', liveVoice: (v) => typeof v === 'boolean', liveEngine: (v) => ['gemini', 'chatgpt'].includes(v), chatBrain: (v) => ['gemini', 'claude', 'chatgpt'].includes(v), screenEngine: (v) => ['claude', 'chatgpt'].includes(v), speakVoice: (v) => ['gemini', 'openai'].includes(v), lastBackupAt: (v) => Number.isFinite(v) && v >= 0
 };
 function readPreferences() {
   let p = {}; try { p = JSON.parse(fs.readFileSync(preferencesFile(), 'utf8')) || {}; } catch {}
@@ -377,7 +377,7 @@ function readPreferences() {
     sleepMinutes: PREF_RULES.sleepMinutes(p.sleepMinutes) ? p.sleepMinutes : 2, fullscreen: p.fullscreen !== false, avatarStyle: p.avatarStyle === 'head' ? 'head' : 'reactor', appsInside: p.appsInside !== false, launchAppsOnStart: p.launchAppsOnStart !== false, dictation: p.dictation !== false, autoDock: p.autoDock !== false, hideTaskbar: p.hideTaskbar !== false,
     userName: typeof p.userName === 'string' ? p.userName.trim() : '', homeCity: typeof p.homeCity === 'string' ? p.homeCity.trim() : '', newsTopics: typeof p.newsTopics === 'string' ? p.newsTopics.trim() : '',
     briefingOnStart: p.briefingOnStart !== false, lastBriefingAt: Number.isFinite(p.lastBriefingAt) ? p.lastBriefingAt : 0,
-    brain: PREF_RULES.brain(p.brain) ? p.brain : 'gemini', dnd: p.dnd === true, lockOnStart: p.lockOnStart === true, lockIdleMinutes: PREF_RULES.lockIdleMinutes(p.lockIdleMinutes) ? p.lockIdleMinutes : 0, backupDaily: p.backupDaily !== false, liveVoice: p.liveVoice !== false, liveEngine: p.liveEngine === 'chatgpt' ? 'chatgpt' : 'gemini', chatBrain: PREF_RULES.chatBrain(p.chatBrain) ? p.chatBrain : 'gemini', speakVoice: p.speakVoice === 'openai' ? 'openai' : 'gemini', lastBackupAt: Number.isFinite(p.lastBackupAt) ? p.lastBackupAt : 0, voiceName: PREF_RULES.voiceName(p.voiceName) ? p.voiceName : null, voices: VOICES };
+    brain: PREF_RULES.brain(p.brain) ? p.brain : 'gemini', dnd: p.dnd === true, lockOnStart: p.lockOnStart === true, lockIdleMinutes: PREF_RULES.lockIdleMinutes(p.lockIdleMinutes) ? p.lockIdleMinutes : 0, backupDaily: p.backupDaily !== false, liveVoice: p.liveVoice !== false, liveEngine: p.liveEngine === 'chatgpt' ? 'chatgpt' : 'gemini', chatBrain: PREF_RULES.chatBrain(p.chatBrain) ? p.chatBrain : 'gemini', speakVoice: p.speakVoice === 'openai' ? 'openai' : 'gemini', screenEngine: p.screenEngine === 'chatgpt' ? 'chatgpt' : 'claude', lastBackupAt: Number.isFinite(p.lastBackupAt) ? p.lastBackupAt : 0, voiceName: PREF_RULES.voiceName(p.voiceName) ? p.voiceName : null, voices: VOICES };
 }
 function currentVoice() {
   const pref = readPreferences().voiceName; if (pref) return pref;
