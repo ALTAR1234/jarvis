@@ -108,6 +108,13 @@ async function geminiDetail(upstream) {
   try { const m = (await upstream.json())?.error?.message || ''; return m.replace(/AIza[0-9A-Za-z_-]{20,}/g, '[key]').replace(/s+/g, ' ').trim().slice(0, 220); } catch { return ''; }
 }
 async function geminiFail(upstream) { const detail = await geminiDetail(upstream); console.warn('Gemini error', upstream.status, detail); return geminiError(upstream.status, detail); }
+// The free local AI reads Jarvis's instructions once in the background so the first question is quick.
+let warming = null;
+const FIXED_PROMPT = () => `${SYSTEM_PROMPT} ${TOOL_PROMPT}`;
+function warmFreeAI() {
+  if (readPreferences().chatBrain !== 'local' || warming) return;
+  warming = brains.warmLocal({ fixed: FIXED_PROMPT(), tools: tools.declarations() }).then((ok) => console.log(ok ? 'Free AI is ready' : 'Free AI warm-up skipped')).catch(() => {}).finally(() => { warming = null; });
+}
 function contextPrompt(voice, timeZone) {
   let zone = typeof timeZone === 'string' && /^[A-Za-z_+\-/0-9]{1,64}$/.test(timeZone) ? timeZone : undefined;
   let now;
@@ -141,7 +148,7 @@ async function withBackup(kind, backup, gemini, other) {
   return other(backup);
 }
 const otherReply = async (b, messages, opts) => ({
-  value: await (b === 'claude' ? brains.chatClaude : b === 'local' ? brains.chatLocal : brains.chatChatGPT)(messages, { system: contextPrompt(opts.voice, opts.timeZone), tools: tools.declarations(), execute: tools.execute, voice: opts.voice }),
+  value: await (b === 'claude' ? brains.chatClaude : b === 'local' ? brains.chatLocal : brains.chatChatGPT)(messages, { system: contextPrompt(opts.voice, opts.timeZone), fixed: FIXED_PROMPT(), tools: tools.declarations(), execute: tools.execute, voice: opts.voice }),
   via: b === 'claude' ? 'Claude' : b === 'local' ? brains.localInfo().using?.name || 'Local AI' : 'ChatGPT'
 });
 async function createReply(messages, opts) {
@@ -758,7 +765,7 @@ function createServer() {
     if (req.method === 'GET' && url.pathname === '/api/brains') { send(res, 200, { available: brains.available(), local: brains.localInfo(), current: readPreferences().brain, claudeModel: brains.CLAUDE_MODEL(), openaiModel: brains.OPENAI_MODEL() }); return; }
     if (req.method === 'GET' && url.pathname === '/api/preferences') { send(res, 200, readPreferences()); return; }
     if (req.method === 'POST' && url.pathname === '/api/preferences') {
-      try { send(res, 200, writePreferences(await readJson(req, 4096))); }
+      try { const patch = await readJson(req, 4096); send(res, 200, writePreferences(patch)); if (patch?.chatBrain === 'local') warmFreeAI(); }
       catch (err) { send(res, err.status || 400, { error: err.message || 'Could not save preferences.' }); }
       return;
     }
@@ -975,7 +982,7 @@ function createServer() {
 
 if (require.main === module) {
   const server = createServer();
-  server.listen(PORT, '127.0.0.1', () => console.log('J.A.R.V.I.S. dashboard listening at http://127.0.0.1:' + PORT));
+  server.listen(PORT, '127.0.0.1', () => { console.log('J.A.R.V.I.S. dashboard listening at http://127.0.0.1:' + PORT); setTimeout(warmFreeAI, 5000); });
 }
 module.exports = { createServer, loadEnv, launchOwnApps };
 

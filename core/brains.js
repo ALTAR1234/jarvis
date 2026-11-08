@@ -26,7 +26,8 @@ function localTarget() {
   if (ollama.up && ollama.models.length) {
     const want = process.env.LOCAL_AI_MODEL;
     // Qwen 2.5 7B first: the best tool-calling open model that runs at talking speed on a laptop CPU with no graphics card
-    const PREFER = [/^qwen2\.5:7b/, /^qwen2\.5:14b/, /^granite4|^granite-?4/, /^llama3\.1:8b/, /qwen|llama|mistral|granite|gemma|phi/i];
+    // jarvis-qwen is Qwen 2.5 7B set up for this laptop's Arc graphics (see ollama/Modelfile)
+    const PREFER = [/^jarvis-qwen/, /^qwen2\.5:7b/, /^qwen2\.5:14b/, /^granite4|^granite-?4/, /^llama3\.1:8b/, /qwen|llama|mistral|granite|gemma|phi/i];
     const model = want && ollama.models.includes(want) ? want : want || PREFER.map((re) => ollama.models.find((m) => re.test(m))).find(Boolean) || ollama.models[0];
     return { name: 'Local AI', url: OLLAMA() + '/v1/chat/completions', key: 'ollama', model };
   }
@@ -181,10 +182,30 @@ async function chatChatGPT(messages, { system, tools, execute, voice = false }) 
 
 // Full J.A.R.V.I.S. chat on the free brain. Small local models can fumble tool calls, so a bad call is
 // reported back to the model instead of failing the whole reply.
-async function chatLocal(messages, { system, tools, execute }) {
+// Local models re-read the whole prompt unless its start is identical to last time, and the instructions
+// plus skill list are ~8K tokens (minutes on a laptop). So the fixed part goes first and the parts that
+// change (the time, voice notes, memories) go in a short note just before the newest message.
+// `fixed` is the part of the instructions that never changes (the caller passes it).
+function splitSystem(system, fixed) {
+  return fixed && system.startsWith(fixed) ? [fixed, system.slice(fixed.length).trim()] : [system, ''];
+}
+// Read the fixed instructions once in the background so the first real question is quick.
+async function warmLocal({ fixed, tools }) {
+  const t = localTarget() || (await probeLocal(), localTarget());
+  if (!t || t.name !== 'Local AI') return false;
+  const defs = tools.map((d) => ({ type: 'function', function: { name: d.name, description: d.description, parameters: jsonSchema(d.parameters) } }));
+  const r = await fetch(t.url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: t.model, messages: [{ role: 'system', content: fixed }, { role: 'user', content: 'Hi' }], tools: defs, max_tokens: 1 }), signal: AbortSignal.timeout(600000) }).catch(() => null);
+  return Boolean(r?.ok);
+}
+async function chatLocal(messages, { system, fixed, tools, execute }) {
   const t = localTarget() || (await probeLocal(), localTarget());
   if (!t) throw new Error('The free AI is not set up yet. Install Ollama and download a model, or add GITHUB_MODELS_TOKEN.');
-  const convo = [{ role: 'system', content: system }, ...messages.map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content }))];
+  const [head, moving] = splitSystem(system, fixed);
+  const history = messages.map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content }));
+  // inside the newest message, not a system message: Ollama merges every system message into the top block
+  const last = history[history.length - 1];
+  if (moving && last?.role === 'user') last.content = `[${moving}]\n\n${last.content}`;
+  const convo = [{ role: 'system', content: head }, ...history];
   const defs = tools.map((d) => ({ type: 'function', function: { name: d.name, description: d.description, parameters: jsonSchema(d.parameters) } }));
   let useTools = true;
   for (let round = 0; round < 10; round++) {
@@ -238,5 +259,5 @@ async function speakOpenAI(text) {
   return { audio: Buffer.from(await r.arrayBuffer()), type: 'audio/mpeg' };
 }
 
-module.exports = { available, localInfo, probeLocal, chatLocal, askClaude, askChatGPT, chatClaude, chatChatGPT, transcribeOpenAI, speakOpenAI, jsonSchema, parseJson, CLAUDE_MODEL, OPENAI_MODEL };
+module.exports = { available, localInfo, probeLocal, chatLocal, warmLocal, askClaude, askChatGPT, chatClaude, chatChatGPT, transcribeOpenAI, speakOpenAI, jsonSchema, parseJson, CLAUDE_MODEL, OPENAI_MODEL };
 
