@@ -25,7 +25,9 @@ setInterval(probeLocal, 30000).unref?.();
 function localTarget() {
   if (ollama.up && ollama.models.length) {
     const want = process.env.LOCAL_AI_MODEL;
-    const model = want && ollama.models.includes(want) ? want : want || ollama.models.find((m) => /qwen|llama|mistral|gemma|phi/i.test(m)) || ollama.models[0];
+    // Qwen 2.5 7B first: the best tool-calling open model that runs at talking speed on a laptop CPU with no graphics card
+    const PREFER = [/^qwen2\.5:7b/, /^qwen2\.5:14b/, /^granite4|^granite-?4/, /^llama3\.1:8b/, /qwen|llama|mistral|granite|gemma|phi/i];
+    const model = want && ollama.models.includes(want) ? want : want || PREFER.map((re) => ollama.models.find((m) => re.test(m))).find(Boolean) || ollama.models[0];
     return { name: 'Local AI', url: OLLAMA() + '/v1/chat/completions', key: 'ollama', model };
   }
   if (process.env.GITHUB_MODELS_TOKEN) return { name: 'GitHub Models', url: 'https://models.github.ai/inference/chat/completions', key: process.env.GITHUB_MODELS_TOKEN, model: process.env.GITHUB_MODELS_MODEL || 'openai/gpt-4.1' };
