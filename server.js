@@ -115,6 +115,13 @@ function warmFreeAI() {
   if (!['local', 'both'].includes(readPreferences().chatBrain) || warming || brains.localReady()) return;
   warming = brains.warmLocal({ fixed: FIXED_PROMPT(), tools: tools.declarations() }).then((ok) => console.log(ok ? 'Free AI is ready' : 'Free AI warm-up skipped')).catch(() => {}).finally(() => { warming = null; });
 }
+// What Jarvis knows about its own brains, so it can answer "which model are you?" and switch on request.
+const CHAT_BRAINS = { gemini: 'Gemini', claude: 'Claude', chatgpt: 'ChatGPT', local: 'the free AI on this PC', both: 'Both (free AI plus Gemini)' };
+function brainsLine(prof) {
+  const have = brains.available(), local = brains.localInfo().using;
+  const list = [have.gemini && 'Gemini (Google, cloud, free quota)', have.claude && 'Claude (Anthropic, cloud)', have.chatgpt && 'ChatGPT (OpenAI, cloud)', have.local && `a free AI running on this PC (${local?.model?.replace(/^jarvis-/, '').replace(/:latest$/, '') || 'open-source'} through Ollama: no quota, offline, slower)`, have.local && have.gemini && 'Both (the free AI for everyday requests, Gemini for web and harder questions)'].filter(Boolean);
+  return `Chat brains you can switch between with set_chat_brain: ${list.join('; ')}. The current chat brain is ${CHAT_BRAINS[prof.chatBrain] || 'Gemini'}.`;
+}
 function contextPrompt(voice, timeZone) {
   let zone = typeof timeZone === 'string' && /^[A-Za-z_+\-/0-9]{1,64}$/.test(timeZone) ? timeZone : undefined;
   let now;
@@ -123,7 +130,7 @@ function contextPrompt(voice, timeZone) {
   const facts = store.memories().slice(-60).map((m) => `- ${m.text}`).join('\n');
   const prof = readPreferences();
   const docked = appdock.state();
-  const who = [prof.userName && `The user's name is ${prof.userName}.`, prof.homeCity && `They live in ${prof.homeCity}.`, docked.apps.length && `Apps docked in the HUD: ${docked.apps.map((a) => a.name).join(', ')}; on screen: ${docked.apps.find((a) => a.handle === docked.active)?.name || 'the J.A.R.V.I.S. home screen'}.`].filter(Boolean).join(' ');
+  const who = [prof.userName && `The user's name is ${prof.userName}.`, prof.homeCity && `They live in ${prof.homeCity}.`, docked.apps.length && `Apps docked in the HUD: ${docked.apps.map((a) => a.name).join(', ')}; on screen: ${docked.apps.find((a) => a.handle === docked.active)?.name || 'the J.A.R.V.I.S. home screen'}.`, brainsLine(prof)].filter(Boolean).join(' ');
   return `${SYSTEM_PROMPT} ${TOOL_PROMPT} ${who} The current local date and time is ${now}${zone ? ` (${zone})` : ''}.${voice ? ' ' + VOICE_PROMPT + ' ' + voicefix.hint() : ''}${facts ? `\n\nWhat you remember about the user (from long-term memory):\n${facts}` : ''}`;
 }
 async function geminiGenerate(model, body, timeoutMs) {
@@ -490,6 +497,13 @@ function initAssistant() {
       summary: () => 'Ask the Big Brain', run: async (a) => ({ status: 'done', answer: await bigBrain([{ text: a.question }], false) }) },
     { name: 'set_brain', description: 'Choose which brain powers Helper, Inboxer and Visioner: gemini (free default), claude, chatgpt, or big (all three combined).', parameters: { type: 'OBJECT', properties: { brain: { type: 'STRING', enum: ['gemini', 'claude', 'chatgpt', 'big'] } }, required: ['brain'] },
       summary: (a) => `Use ${a.brain}`, run: async (a) => { writePreferences({ brain: a.brain }); return { status: 'done', brain: a.brain, ready: a.brain === 'big' ? brains.available() : brains.available()[a.brain === 'chatgpt' ? 'chatgpt' : a.brain] }; } },
+    { name: 'set_chat_brain', description: `Choose which brain answers the user in chat and voice: gemini, claude, chatgpt, local (the free AI running on this PC, an open-source model through Ollama: no key or quota, works offline, slower and less clever), or both (the free AI handles everyday requests and Gemini handles web and harder questions, to save Gemini's quota). Use when the user asks to switch models, use the free/local/open-source AI, Qwen, Llama or Ollama, or to save quota.`, parameters: { type: 'OBJECT', properties: { brain: { type: 'STRING', enum: ['gemini', 'claude', 'chatgpt', 'local', 'both'] } }, required: ['brain'] },
+      summary: (a) => `Answer with ${CHAT_BRAINS[a.brain] || a.brain}`, run: async (a) => {
+        const have = brains.available(), ready = a.brain === 'both' ? have.local && have.gemini : have[a.brain];
+        if (!ready) return { status: 'not_ready', brain: a.brain, reason: a.brain === 'local' || a.brain === 'both' ? 'The free AI needs Ollama running with a model downloaded.' : 'That brain has no API key yet.' };
+        writePreferences({ chatBrain: a.brain }); if (a.brain === 'local' || a.brain === 'both') warmFreeAI();
+        return { status: 'done', chatBrain: a.brain, note: a.brain === 'gemini' ? undefined : 'Takes effect from the next message.' };
+      } },
     { name: 'open_inboxer', description: "Open Inboxer: one inbox of the user's unread Gmail, Socialer chats, Instagram/Snapchat/TikTok counts and today's reminders, sorted into needs-you, FYI and junk with drafted replies.", parameters: { type: 'OBJECT', properties: {} },
       summary: () => 'Open Inboxer', run: async () => { await globalThis.jarvisOpenPanel?.('inboxer'); return { status: 'started' }; } },
     { name: 'inbox_summary', description: "Summarise what is waiting in the user's inbox (Gmail, Socialer, reminders): how many need them, and the most important ones.", parameters: { type: 'OBJECT', properties: {} },
