@@ -33,7 +33,9 @@ const BUILTIN = [
     summary: (a) => (typeof a.mute === 'boolean' ? (a.mute ? 'Mute audio' : 'Unmute audio') : Number.isFinite(a.level) ? `Set volume to ${a.level}%` : `Change volume by ${a.change}`),
     run: async (a) => {
       const before = await osx.volume();
-      const after = await osx.volume({ level: a.level, change: a.change, mute: a.mute });
+      // a level change with a mute flag alongside is a model filling in every field: the level wins
+      const setsLevel = Number.isFinite(a.level) || Number.isFinite(a.change);
+      const after = await osx.volume({ level: a.level, change: a.change, mute: setsLevel ? undefined : a.mute });
       files.pushUndo('volume', async () => { await osx.volume({ level: before.level, mute: before.muted }); return `Volume restored to ${before.level}%`; });
       return { status: 'done', ...after };
     } },

@@ -12,8 +12,13 @@ const available = () => ({ gemini: Boolean(process.env.GEMINI_API_KEY), claude: 
 // or GitHub Models when GITHUB_MODELS_TOKEN is set and Ollama is not running. Both speak the OpenAI chat format.
 const OLLAMA = () => (process.env.LOCAL_AI_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
 let ollama = { up: false, models: [] };
+let warm = false; // Jarvis's instructions are loaded in Ollama, so answers are quick
+const localReady = () => warm && ollama.up;
 async function probeLocal() {
   try {
+    // a model Ollama has unloaded has forgotten the instructions
+    const ps = await fetch(OLLAMA() + '/api/ps', { signal: AbortSignal.timeout(1500) }).then((r) => r.json()).catch(() => null);
+    if (ps && warm && !(ps.models || []).some((m) => m.name === localTarget()?.model)) warm = false;
     const r = await fetch(OLLAMA() + '/api/tags', { signal: AbortSignal.timeout(1500) });
     const j = await r.json();
     ollama = { up: r.ok, models: (j.models || []).map((m) => m.name) };
@@ -34,7 +39,7 @@ function localTarget() {
   if (process.env.GITHUB_MODELS_TOKEN) return { name: 'GitHub Models', url: 'https://models.github.ai/inference/chat/completions', key: process.env.GITHUB_MODELS_TOKEN, model: process.env.GITHUB_MODELS_MODEL || 'openai/gpt-4.1' };
   return null;
 }
-const localInfo = () => ({ ollama: ollama.up, models: ollama.models, github: Boolean(process.env.GITHUB_MODELS_TOKEN), using: localTarget() && { name: localTarget().name, model: localTarget().model } });
+const localInfo = () => ({ ready: localReady(), ollama: ollama.up, models: ollama.models, github: Boolean(process.env.GITHUB_MODELS_TOKEN), using: localTarget() && { name: localTarget().name, model: localTarget().model } });
 
 let client = null;
 const claude = () => (client ||= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 2, timeout: 120000 }));
@@ -195,9 +200,11 @@ async function warmLocal({ fixed, tools }) {
   if (!t || t.name !== 'Local AI') return false;
   const defs = tools.map((d) => ({ type: 'function', function: { name: d.name, description: d.description, parameters: jsonSchema(d.parameters) } }));
   const r = await fetch(t.url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: t.model, messages: [{ role: 'system', content: fixed }, { role: 'user', content: 'Hi' }], tools: defs, max_tokens: 1 }), signal: AbortSignal.timeout(600000) }).catch(() => null);
-  return Boolean(r?.ok);
+  warm = Boolean(r?.ok);
+  return warm;
 }
-async function chatLocal(messages, { system, fixed, tools, execute }) {
+async function chatLocal(messages, { system, fixed, tools, execute, timeoutMs = 300000 }) {
+  const deadline = Date.now() + timeoutMs;
   const t = localTarget() || (await probeLocal(), localTarget());
   if (!t) throw new Error('The free AI is not set up yet. Install Ollama and download a model, or add GITHUB_MODELS_TOKEN.');
   const [head, moving] = splitSystem(system, fixed);
@@ -211,7 +218,7 @@ async function chatLocal(messages, { system, fixed, tools, execute }) {
   for (let round = 0; round < 10; round++) {
     let r;
     try {
-      r = await fetch(t.url, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${t.key}` }, body: JSON.stringify({ model: t.model, messages: convo, ...(useTools ? { tools: defs } : {}) }), signal: AbortSignal.timeout(300000) });
+      r = await fetch(t.url, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${t.key}` }, body: JSON.stringify({ model: t.model, messages: convo, ...(useTools ? { tools: defs } : {}) }), signal: AbortSignal.timeout(Math.max(1000, deadline - Date.now())) });
     } catch { throw new Error(t.name === 'Local AI' ? 'The local AI stopped responding. Is Ollama still running?' : 'Could not reach GitHub Models. Check the internet connection.'); }
     const j = await r.json().catch(() => ({}));
     // some models have no tool support: answer without tools rather than failing
@@ -259,5 +266,5 @@ async function speakOpenAI(text) {
   return { audio: Buffer.from(await r.arrayBuffer()), type: 'audio/mpeg' };
 }
 
-module.exports = { available, localInfo, probeLocal, chatLocal, warmLocal, askClaude, askChatGPT, chatClaude, chatChatGPT, transcribeOpenAI, speakOpenAI, jsonSchema, parseJson, CLAUDE_MODEL, OPENAI_MODEL };
+module.exports = { available, localInfo, localReady, probeLocal, chatLocal, warmLocal, askClaude, askChatGPT, chatClaude, chatChatGPT, transcribeOpenAI, speakOpenAI, jsonSchema, parseJson, CLAUDE_MODEL, OPENAI_MODEL };
 

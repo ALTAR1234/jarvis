@@ -112,7 +112,7 @@ async function geminiFail(upstream) { const detail = await geminiDetail(upstream
 let warming = null;
 const FIXED_PROMPT = () => `${SYSTEM_PROMPT} ${TOOL_PROMPT}`;
 function warmFreeAI() {
-  if (readPreferences().chatBrain !== 'local' || warming) return;
+  if (!['local', 'both'].includes(readPreferences().chatBrain) || warming || brains.localReady()) return;
   warming = brains.warmLocal({ fixed: FIXED_PROMPT(), tools: tools.declarations() }).then((ok) => console.log(ok ? 'Free AI is ready' : 'Free AI warm-up skipped')).catch(() => {}).finally(() => { warming = null; });
 }
 function contextPrompt(voice, timeZone) {
@@ -151,7 +151,27 @@ const otherReply = async (b, messages, opts) => ({
   value: await (b === 'claude' ? brains.chatClaude : b === 'local' ? brains.chatLocal : brains.chatChatGPT)(messages, { system: contextPrompt(opts.voice, opts.timeZone), fixed: FIXED_PROMPT(), tools: tools.declarations(), execute: tools.execute, voice: opts.voice }),
   via: b === 'claude' ? 'Claude' : b === 'local' ? brains.localInfo().using?.name || 'Local AI' : 'ChatGPT'
 });
+// "Both": the free AI on this PC answers everyday things so Gemini's quota lasts. Gemini takes questions
+// that need live web info or deeper thought, anything the free AI can't answer quickly, and the free AI
+// covers for Gemini when its quota runs out.
+const NEEDS_WEB = /\b(news|latest|today'?s|tonight|this week|current(ly)?|right now|weather|forecast|score|won|winner|price|stock|search|look ?up|google|who is|what is the .* of|release date|schedule|traffic|recipe|review)\b/i;
+const NEEDS_THOUGHT = /\b(explain|why|compare|analy[sz]e|write|essay|plan|summari[sz]e|code|debug|story|poem|email|letter|step[- ]by[- ]step)\b/i;
+async function bothReply(messages, opts, have) {
+  const ask = String(messages[messages.length - 1]?.content || '');
+  const hard = ask.length > 280 || NEEDS_WEB.test(ask) || NEEDS_THOUGHT.test(ask);
+  const local = (timeoutMs) => brains.chatLocal(messages, { system: contextPrompt(opts.voice, opts.timeZone), fixed: FIXED_PROMPT(), tools: tools.declarations(), execute: tools.execute, timeoutMs }).then((value) => ({ value, via: 'Free AI' }));
+  if (!hard && have.local && brains.localReady()) {
+    try { return await local(60000); } catch (err) { console.warn('Free AI was too slow or failed, asking Gemini:', err.message); }
+  } else if (!have.gemini && have.local) return local(300000);
+  try { return { value: await createGeminiReply(messages, opts), via: 'Gemini' }; }
+  catch (err) {
+    if (!have.local || !isLimit(err)) throw err;
+    console.warn('Gemini is out of quota, the free AI is answering');
+    return local(300000);
+  }
+}
 async function createReply(messages, opts) {
+  if (readPreferences().chatBrain === 'both') return bothReply(messages, opts, brains.available());
   // The chat brain the user picked answers first; if it fails, Gemini, then whichever other brain has a key.
   const pick = readPreferences().chatBrain, have = brains.available();
   if (pick !== 'gemini' && have[pick]) {
@@ -376,7 +396,7 @@ const PREF_RULES = {
   sleepMinutes: (v) => Number.isInteger(v) && v >= 1 && v <= 60, voiceName: (v) => VOICES.includes(v), fullscreen: (v) => typeof v === 'boolean', avatarStyle: (v) => ['reactor', 'head'].includes(v), appsInside: (v) => typeof v === 'boolean', launchAppsOnStart: (v) => typeof v === 'boolean', dictation: (v) => typeof v === 'boolean', autoDock: (v) => typeof v === 'boolean', hideTaskbar: (v) => typeof v === 'boolean',
   userName: (v) => typeof v === 'string' && v.length <= 40, homeCity: (v) => typeof v === 'string' && v.length <= 80, newsTopics: (v) => typeof v === 'string' && v.length <= 160,
   briefingOnStart: (v) => typeof v === 'boolean', lastBriefingAt: (v) => Number.isFinite(v) && v >= 0,
-  brain: (v) => ['gemini', 'claude', 'chatgpt', 'big'].includes(v), dnd: (v) => typeof v === 'boolean', lockOnStart: (v) => typeof v === 'boolean', lockIdleMinutes: (v) => Number.isInteger(v) && v >= 0 && v <= 240, backupDaily: (v) => typeof v === 'boolean', liveVoice: (v) => typeof v === 'boolean', liveEngine: (v) => ['gemini', 'chatgpt'].includes(v), chatBrain: (v) => ['gemini', 'claude', 'chatgpt', 'local'].includes(v), screenEngine: (v) => ['claude', 'chatgpt', 'gemini'].includes(v), speakVoice: (v) => ['gemini', 'openai'].includes(v), lastBackupAt: (v) => Number.isFinite(v) && v >= 0
+  brain: (v) => ['gemini', 'claude', 'chatgpt', 'big'].includes(v), dnd: (v) => typeof v === 'boolean', lockOnStart: (v) => typeof v === 'boolean', lockIdleMinutes: (v) => Number.isInteger(v) && v >= 0 && v <= 240, backupDaily: (v) => typeof v === 'boolean', liveVoice: (v) => typeof v === 'boolean', liveEngine: (v) => ['gemini', 'chatgpt'].includes(v), chatBrain: (v) => ['gemini', 'claude', 'chatgpt', 'local', 'both'].includes(v), screenEngine: (v) => ['claude', 'chatgpt', 'gemini'].includes(v), speakVoice: (v) => ['gemini', 'openai'].includes(v), lastBackupAt: (v) => Number.isFinite(v) && v >= 0
 };
 function readPreferences() {
   let p = {}; try { p = JSON.parse(fs.readFileSync(preferencesFile(), 'utf8')) || {}; } catch {}
@@ -643,6 +663,8 @@ function windowAction(action) {
 }
 function createServer() {
   initAssistant();
+  // the free local AI reads Jarvis's instructions in the background, and again if Ollama unloads it
+  setTimeout(warmFreeAI, 5000); setInterval(warmFreeAI, 60000).unref?.();
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     if (url.pathname.startsWith('/api/') && !trustedRequest(req, server)) { send(res, 403, { error: 'Forbidden' }); return; }
@@ -765,7 +787,7 @@ function createServer() {
     if (req.method === 'GET' && url.pathname === '/api/brains') { send(res, 200, { available: brains.available(), local: brains.localInfo(), current: readPreferences().brain, claudeModel: brains.CLAUDE_MODEL(), openaiModel: brains.OPENAI_MODEL() }); return; }
     if (req.method === 'GET' && url.pathname === '/api/preferences') { send(res, 200, readPreferences()); return; }
     if (req.method === 'POST' && url.pathname === '/api/preferences') {
-      try { const patch = await readJson(req, 4096); send(res, 200, writePreferences(patch)); if (patch?.chatBrain === 'local') warmFreeAI(); }
+      try { const patch = await readJson(req, 4096); send(res, 200, writePreferences(patch)); if (['local', 'both'].includes(patch?.chatBrain)) warmFreeAI(); }
       catch (err) { send(res, err.status || 400, { error: err.message || 'Could not save preferences.' }); }
       return;
     }
@@ -982,7 +1004,7 @@ function createServer() {
 
 if (require.main === module) {
   const server = createServer();
-  server.listen(PORT, '127.0.0.1', () => { console.log('J.A.R.V.I.S. dashboard listening at http://127.0.0.1:' + PORT); setTimeout(warmFreeAI, 5000); });
+  server.listen(PORT, '127.0.0.1', () => { console.log('J.A.R.V.I.S. dashboard listening at http://127.0.0.1:' + PORT); });
 }
 module.exports = { createServer, loadEnv, launchOwnApps };
 
