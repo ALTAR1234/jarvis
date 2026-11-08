@@ -11,6 +11,7 @@ const appdock = require('./core/appdock');
 const inbox = require('./core/inbox');
 const helper = require('./core/helper');
 const brains = require('./core/brains');
+const ownai = require('./core/ownai'); // Jarvis Core, our own AI
 const osapps = require('./core/osapps');
 const voicefix = require('./core/voicefix');
 const voiceid = require('./core/voiceid');
@@ -116,10 +117,10 @@ function warmFreeAI() {
   warming = brains.warmLocal({ fixed: FIXED_PROMPT(), tools: tools.declarations() }).then((ok) => console.log(ok ? 'Free AI is ready' : 'Free AI warm-up skipped')).catch(() => {}).finally(() => { warming = null; });
 }
 // What Jarvis knows about its own brains, so it can answer "which model are you?" and switch on request.
-const CHAT_BRAINS = { gemini: 'Gemini', claude: 'Claude', chatgpt: 'ChatGPT', local: 'the free AI on this PC', both: 'Both (free AI plus Gemini)' };
+const CHAT_BRAINS = { gemini: 'Gemini', claude: 'Claude', chatgpt: 'ChatGPT', local: 'the free AI on this PC', core: 'Jarvis Core (your own AI)', both: 'Both (free AI plus Gemini)' };
 function brainsLine(prof) {
   const have = brains.available(), local = brains.localInfo().using;
-  const list = [have.gemini && 'Gemini (Google, cloud, free quota)', have.claude && 'Claude (Anthropic, cloud)', have.chatgpt && 'ChatGPT (OpenAI, cloud)', have.local && `a free AI running on this PC (${local?.model?.replace(/^jarvis-/, '').replace(/:latest$/, '') || 'open-source'} through Ollama: no quota, offline, slower)`, have.local && have.gemini && 'Both (the free AI for everyday requests, Gemini for web and harder questions)'].filter(Boolean);
+  const list = [have.gemini && 'Gemini (Google, cloud, free quota)', have.claude && 'Claude (Anthropic, cloud)', have.chatgpt && 'ChatGPT (OpenAI, cloud)', have.local && `a free AI running on this PC (${local?.model?.replace(/^jarvis-/, '').replace(/:latest$/, '') || 'open-source'} through Ollama: no quota, offline, slower)`, 'Jarvis Core (your own AI, built for this PC: instant commands and web look-ups)', have.local && have.gemini && 'Both (the free AI for everyday requests, Gemini for web and harder questions)'].filter(Boolean);
   return `Chat brains you can switch between with set_chat_brain: ${list.join('; ')}. The current chat brain is ${CHAT_BRAINS[prof.chatBrain] || 'Gemini'}.`;
 }
 function contextPrompt(voice, timeZone) {
@@ -178,7 +179,22 @@ async function bothReply(messages, opts, have) {
   }
 }
 async function createReply(messages, opts) {
-  if (readPreferences().chatBrain === 'both') return bothReply(messages, opts, brains.available());
+  const pick0 = readPreferences().chatBrain;
+  // Jarvis Core, our own AI, answers first in Core and Both: commands and look-ups in well under a second
+  if (pick0 === 'core' || pick0 === 'both') {
+    const last = messages[messages.length - 1];
+    if (last?.role === 'user') {
+      try { const r = await ownai.reply(last.content, { execute: tools.execute }); if (r) return { value: r.text, via: 'Jarvis Core' }; }
+      catch (err) { console.warn('Jarvis Core could not answer:', err.message); }
+    }
+    if (pick0 === 'core') {
+      // Core never spends Gemini quota: the free AI on this PC takes what Core can't
+      const have = brains.available();
+      if (have.local) return { value: await brains.chatLocal(messages, { system: contextPrompt(opts.voice, opts.timeZone), fixed: FIXED_PROMPT(), tools: tools.declarations(), execute: tools.execute }), via: 'Free AI' };
+      return { value: "That one is beyond me for now, sir. Switch me to Both and I'll ask Gemini.", via: 'Jarvis Core' };
+    }
+  }
+  if (pick0 === 'both') return bothReply(messages, opts, brains.available());
   // The chat brain the user picked answers first; if it fails, Gemini, then whichever other brain has a key.
   const pick = readPreferences().chatBrain, have = brains.available();
   if (pick !== 'gemini' && have[pick]) {
@@ -403,7 +419,7 @@ const PREF_RULES = {
   sleepMinutes: (v) => Number.isInteger(v) && v >= 1 && v <= 60, voiceName: (v) => VOICES.includes(v), fullscreen: (v) => typeof v === 'boolean', avatarStyle: (v) => ['reactor', 'head'].includes(v), appsInside: (v) => typeof v === 'boolean', launchAppsOnStart: (v) => typeof v === 'boolean', dictation: (v) => typeof v === 'boolean', autoDock: (v) => typeof v === 'boolean', hideTaskbar: (v) => typeof v === 'boolean',
   userName: (v) => typeof v === 'string' && v.length <= 40, homeCity: (v) => typeof v === 'string' && v.length <= 80, newsTopics: (v) => typeof v === 'string' && v.length <= 160,
   briefingOnStart: (v) => typeof v === 'boolean', lastBriefingAt: (v) => Number.isFinite(v) && v >= 0,
-  brain: (v) => ['gemini', 'claude', 'chatgpt', 'big'].includes(v), dnd: (v) => typeof v === 'boolean', lockOnStart: (v) => typeof v === 'boolean', lockIdleMinutes: (v) => Number.isInteger(v) && v >= 0 && v <= 240, backupDaily: (v) => typeof v === 'boolean', liveVoice: (v) => typeof v === 'boolean', liveEngine: (v) => ['gemini', 'chatgpt'].includes(v), chatBrain: (v) => ['gemini', 'claude', 'chatgpt', 'local', 'both'].includes(v), screenEngine: (v) => ['claude', 'chatgpt', 'gemini'].includes(v), speakVoice: (v) => ['gemini', 'openai'].includes(v), lastBackupAt: (v) => Number.isFinite(v) && v >= 0
+  brain: (v) => ['gemini', 'claude', 'chatgpt', 'big'].includes(v), dnd: (v) => typeof v === 'boolean', lockOnStart: (v) => typeof v === 'boolean', lockIdleMinutes: (v) => Number.isInteger(v) && v >= 0 && v <= 240, backupDaily: (v) => typeof v === 'boolean', liveVoice: (v) => typeof v === 'boolean', liveEngine: (v) => ['gemini', 'chatgpt'].includes(v), chatBrain: (v) => ['gemini', 'claude', 'chatgpt', 'local', 'core', 'both'].includes(v), screenEngine: (v) => ['claude', 'chatgpt', 'gemini'].includes(v), speakVoice: (v) => ['gemini', 'openai'].includes(v), lastBackupAt: (v) => Number.isFinite(v) && v >= 0
 };
 function readPreferences() {
   let p = {}; try { p = JSON.parse(fs.readFileSync(preferencesFile(), 'utf8')) || {}; } catch {}
@@ -497,9 +513,9 @@ function initAssistant() {
       summary: () => 'Ask the Big Brain', run: async (a) => ({ status: 'done', answer: await bigBrain([{ text: a.question }], false) }) },
     { name: 'set_brain', description: 'Choose which brain powers Helper, Inboxer and Visioner: gemini (free default), claude, chatgpt, or big (all three combined).', parameters: { type: 'OBJECT', properties: { brain: { type: 'STRING', enum: ['gemini', 'claude', 'chatgpt', 'big'] } }, required: ['brain'] },
       summary: (a) => `Use ${a.brain}`, run: async (a) => { writePreferences({ brain: a.brain }); return { status: 'done', brain: a.brain, ready: a.brain === 'big' ? brains.available() : brains.available()[a.brain === 'chatgpt' ? 'chatgpt' : a.brain] }; } },
-    { name: 'set_chat_brain', description: `Choose which brain answers the user in chat and voice: gemini, claude, chatgpt, local (the free AI running on this PC, an open-source model through Ollama: no key or quota, works offline, slower and less clever), or both (the free AI handles everyday requests and Gemini handles web and harder questions, to save Gemini's quota). Use when the user asks to switch models, use the free/local/open-source AI, Qwen, Llama or Ollama, or to save quota.`, parameters: { type: 'OBJECT', properties: { brain: { type: 'STRING', enum: ['gemini', 'claude', 'chatgpt', 'local', 'both'] } }, required: ['brain'] },
+    { name: 'set_chat_brain', description: `Choose which brain answers the user in chat and voice: gemini, claude, chatgpt, local (the free AI running on this PC, an open-source model through Ollama: no key or quota, works offline, slower and less clever), core (Jarvis Core, the user's own AI built for this PC: instant commands and web look-ups, with the free AI as backup, never uses Gemini quota), or both (Jarvis Core first, then the free AI handles everyday requests and Gemini handles web and harder questions, to save Gemini's quota). Use when the user asks to switch models, use the free/local/open-source AI, Qwen, Llama or Ollama, or to save quota.`, parameters: { type: 'OBJECT', properties: { brain: { type: 'STRING', enum: ['gemini', 'claude', 'chatgpt', 'local', 'core', 'both'] } }, required: ['brain'] },
       summary: (a) => `Answer with ${CHAT_BRAINS[a.brain] || a.brain}`, run: async (a) => {
-        const have = brains.available(), ready = a.brain === 'both' ? have.local && have.gemini : have[a.brain];
+        const have = brains.available(), ready = a.brain === 'both' ? have.local && have.gemini : a.brain === 'core' ? true : have[a.brain];
         if (!ready) return { status: 'not_ready', brain: a.brain, reason: a.brain === 'local' || a.brain === 'both' ? 'The free AI needs Ollama running with a model downloaded.' : 'That brain has no API key yet.' };
         writePreferences({ chatBrain: a.brain }); if (a.brain === 'local' || a.brain === 'both') warmFreeAI();
         return { status: 'done', chatBrain: a.brain, note: a.brain === 'gemini' ? undefined : 'Takes effect from the next message.' };
@@ -678,6 +694,7 @@ function windowAction(action) {
 function createServer() {
   initAssistant();
   // the free local AI reads Jarvis's instructions in the background, and again if Ollama unloads it
+  setTimeout(() => { try { ownai.warm(); } catch (e) { console.warn('Jarvis Core training failed:', e.message); } }, 3000);
   setTimeout(warmFreeAI, 5000); setInterval(warmFreeAI, 60000).unref?.();
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
