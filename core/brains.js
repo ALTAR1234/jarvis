@@ -6,7 +6,32 @@ const voicefix = require('./voicefix');
 
 const CLAUDE_MODEL = () => process.env.CLAUDE_MODEL || 'claude-opus-5-5';
 const OPENAI_MODEL = () => process.env.OPENAI_MODEL || 'gpt-5';
-const available = () => ({ gemini: Boolean(process.env.GEMINI_API_KEY), claude: Boolean(process.env.ANTHROPIC_API_KEY), chatgpt: Boolean(process.env.OPENAI_API_KEY) });
+const available = () => ({ gemini: Boolean(process.env.GEMINI_API_KEY), claude: Boolean(process.env.ANTHROPIC_API_KEY), chatgpt: Boolean(process.env.OPENAI_API_KEY), local: Boolean(localTarget()) });
+
+// The free brain: open models running on this PC through Ollama (no key, no credits, works offline),
+// or GitHub Models when GITHUB_MODELS_TOKEN is set and Ollama is not running. Both speak the OpenAI chat format.
+const OLLAMA = () => (process.env.LOCAL_AI_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
+let ollama = { up: false, models: [] };
+async function probeLocal() {
+  try {
+    const r = await fetch(OLLAMA() + '/api/tags', { signal: AbortSignal.timeout(1500) });
+    const j = await r.json();
+    ollama = { up: r.ok, models: (j.models || []).map((m) => m.name) };
+  } catch { ollama = { up: false, models: [] }; }
+  return ollama;
+}
+probeLocal();
+setInterval(probeLocal, 30000).unref?.();
+function localTarget() {
+  if (ollama.up && ollama.models.length) {
+    const want = process.env.LOCAL_AI_MODEL;
+    const model = want && ollama.models.includes(want) ? want : want || ollama.models.find((m) => /qwen|llama|mistral|gemma|phi/i.test(m)) || ollama.models[0];
+    return { name: 'Local AI', url: OLLAMA() + '/v1/chat/completions', key: 'ollama', model };
+  }
+  if (process.env.GITHUB_MODELS_TOKEN) return { name: 'GitHub Models', url: 'https://models.github.ai/inference/chat/completions', key: process.env.GITHUB_MODELS_TOKEN, model: process.env.GITHUB_MODELS_MODEL || 'openai/gpt-4.1' };
+  return null;
+}
+const localInfo = () => ({ ollama: ollama.up, models: ollama.models, github: Boolean(process.env.GITHUB_MODELS_TOKEN), using: localTarget() && { name: localTarget().name, model: localTarget().model } });
 
 let client = null;
 const claude = () => (client ||= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 2, timeout: 120000 }));
@@ -152,6 +177,40 @@ async function chatChatGPT(messages, { system, tools, execute, voice = false }) 
   throw new Error('That took too many steps. Try breaking the request into smaller parts.');
 }
 
+// Full J.A.R.V.I.S. chat on the free brain. Small local models can fumble tool calls, so a bad call is
+// reported back to the model instead of failing the whole reply.
+async function chatLocal(messages, { system, tools, execute }) {
+  const t = localTarget() || (await probeLocal(), localTarget());
+  if (!t) throw new Error('The free AI is not set up yet. Install Ollama and download a model, or add GITHUB_MODELS_TOKEN.');
+  const convo = [{ role: 'system', content: system }, ...messages.map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content }))];
+  const defs = tools.map((d) => ({ type: 'function', function: { name: d.name, description: d.description, parameters: jsonSchema(d.parameters) } }));
+  let useTools = true;
+  for (let round = 0; round < 10; round++) {
+    let r;
+    try {
+      r = await fetch(t.url, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${t.key}` }, body: JSON.stringify({ model: t.model, messages: convo, ...(useTools ? { tools: defs } : {}) }), signal: AbortSignal.timeout(300000) });
+    } catch { throw new Error(t.name === 'Local AI' ? 'The local AI stopped responding. Is Ollama still running?' : 'Could not reach GitHub Models. Check the internet connection.'); }
+    const j = await r.json().catch(() => ({}));
+    // some models have no tool support: answer without tools rather than failing
+    if (r.status === 400 && useTools && /tool/i.test(JSON.stringify(j))) { useTools = false; continue; }
+    if (r.status === 401 || r.status === 403) throw new Error(`${t.name} rejected the token. Check GITHUB_MODELS_TOKEN.`);
+    if (r.status === 429) throw Object.assign(new Error(`${t.name} hit its free limit for now. Try again later.`), { status: 429 });
+    if (!r.ok) throw new Error(`${t.name} returned an error (${r.status}): ${String(j.error?.message || j.error || '').slice(0, 120)}`);
+    const msg = j.choices?.[0]?.message || {};
+    const calls = msg.tool_calls || [];
+    // reasoning models wrap their thinking in <think> tags; only the answer is spoken
+    if (!calls.length) return String(msg.content || '').replace(/<think>[\s\S]*?<\/think>/g, '').trim() || 'Done, sir.';
+    convo.push({ role: 'assistant', content: msg.content || '', tool_calls: calls });
+    const results = await Promise.all(calls.map(async (c) => {
+      let args = c.function?.arguments || {};
+      if (typeof args === 'string') try { args = JSON.parse(args || '{}'); } catch { return { error: 'The arguments were not valid JSON.' }; }
+      try { return await execute(c.function?.name, args, { callId: c.id }); } catch (e) { return { error: e.message }; }
+    }));
+    calls.forEach((c, i) => convo.push({ role: 'tool', tool_call_id: c.id, content: toolText(results[i]) }));
+  }
+  throw new Error('That took too many steps. Try breaking the request into smaller parts.');
+}
+
 // Speech on OpenAI, for when Gemini's voice limit runs out.
 async function transcribeOpenAI(audio, contentType) {
   const key = process.env.OPENAI_API_KEY;
@@ -177,5 +236,5 @@ async function speakOpenAI(text) {
   return { audio: Buffer.from(await r.arrayBuffer()), type: 'audio/mpeg' };
 }
 
-module.exports = { available, askClaude, askChatGPT, chatClaude, chatChatGPT, transcribeOpenAI, speakOpenAI, jsonSchema, parseJson, CLAUDE_MODEL, OPENAI_MODEL };
+module.exports = { available, localInfo, probeLocal, chatLocal, askClaude, askChatGPT, chatClaude, chatChatGPT, transcribeOpenAI, speakOpenAI, jsonSchema, parseJson, CLAUDE_MODEL, OPENAI_MODEL };
 

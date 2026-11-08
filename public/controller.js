@@ -15,9 +15,11 @@
     $('#brains').innerHTML = B.map(([k, l, i, s]) => `<button class="tile${state.brain === k ? ' on' : ''}" data-brain="${k}" ${ready(k) ? '' : 'disabled title="Add the API key first"'}><span>${i}</span>${l}<small>${ready(k) ? s : 'needs a key'}</small></button>`).join('');
     $$('[data-brain]').forEach((b) => (b.onclick = async () => { await post('/api/preferences', { brain: b.dataset.brain }); toast(`Using ${b.textContent.trim().split(/\s{2,}/)[0]}`); load(); }));
     const prefs = await get('/api/preferences');
-    const CB = [['gemini', 'Gemini', '✦', 'fastest'], ['claude', 'Claude', '✳', 'smartest'], ['chatgpt', 'ChatGPT', '❂', 'OpenAI']];
-    $('#chatbrain').innerHTML = CB.map(([k, l, i, s]) => `<button class="tile${prefs.chatBrain === k ? ' on' : ''}" data-chatbrain="${k}" ${have[k] ? '' : 'disabled title="Add the API key first"'}><span>${i}</span>${l}<small>${have[k] ? s : 'needs a key'}</small></button>`).join('');
-    $$('[data-chatbrain]').forEach((b) => (b.onclick = async () => { await post('/api/preferences', { chatBrain: b.dataset.chatbrain }); toast(`${b.dataset.chatbrain === 'chatgpt' ? 'ChatGPT' : b.dataset.chatbrain[0].toUpperCase() + b.dataset.chatbrain.slice(1)} answers now`); load(); }));
+    const lu = state.local?.using;
+    const CB = [['gemini', 'Gemini', '✦', 'fastest'], ['claude', 'Claude', '✳', 'smartest'], ['chatgpt', 'ChatGPT', '❂', 'OpenAI'], ['local', 'Free AI', '◎', lu ? lu.model.replace(/^.*\//, '') : '']];
+    const missing = (k) => (k === 'local' ? (state.local?.ollama ? 'download a model' : 'needs Ollama') : 'needs a key');
+    $('#chatbrain').innerHTML = CB.map(([k, l, i, s]) => `<button class="tile${prefs.chatBrain === k ? ' on' : ''}" data-chatbrain="${k}" ${have[k] ? '' : `disabled title="${k === 'local' ? 'Install Ollama and download a model first' : 'Add the API key first'}"`}><span>${i}</span>${l}<small>${have[k] ? s : missing(k)}</small></button>`).join('');
+    $$('[data-chatbrain]').forEach((b) => (b.onclick = async () => { await post('/api/preferences', { chatBrain: b.dataset.chatbrain }); toast(`${b.dataset.chatbrain === 'local' ? 'The free AI' : b.dataset.chatbrain === 'chatgpt' ? 'ChatGPT' : b.dataset.chatbrain[0].toUpperCase() + b.dataset.chatbrain.slice(1)} answers now`); load(); }));
     const SE = [['claude', 'Claude', '✳', 'most accurate'], ['chatgpt', 'ChatGPT', '❂', 'OpenAI'], ['gemini', 'Gemini', '✦', 'Google']];
     $('#screenengine').innerHTML = SE.map(([k, l, i, s]) => `<button class="tile${prefs.screenEngine === k ? ' on' : ''}" data-screen="${k}" ${have[k] ? '' : 'disabled title="Add the API key first"'}><span>${i}</span>${l}<small>${have[k] ? s : 'needs a key'}</small></button>`).join('');
     $$('[data-screen]').forEach((b) => (b.onclick = async () => { await post('/api/preferences', { screenEngine: b.dataset.screen }); toast(`${{ claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini' }[b.dataset.screen]} controls the screen now`); load(); }));

@@ -141,8 +141,8 @@ async function withBackup(kind, backup, gemini, other) {
   return other(backup);
 }
 const otherReply = async (b, messages, opts) => ({
-  value: await (b === 'claude' ? brains.chatClaude : brains.chatChatGPT)(messages, { system: contextPrompt(opts.voice, opts.timeZone), tools: tools.declarations(), execute: tools.execute, voice: opts.voice }),
-  via: b === 'claude' ? 'Claude' : 'ChatGPT'
+  value: await (b === 'claude' ? brains.chatClaude : b === 'local' ? brains.chatLocal : brains.chatChatGPT)(messages, { system: contextPrompt(opts.voice, opts.timeZone), tools: tools.declarations(), execute: tools.execute, voice: opts.voice }),
+  via: b === 'claude' ? 'Claude' : b === 'local' ? brains.localInfo().using?.name || 'Local AI' : 'ChatGPT'
 });
 async function createReply(messages, opts) {
   // The chat brain the user picked answers first; if it fails, Gemini, then whichever other brain has a key.
@@ -151,7 +151,7 @@ async function createReply(messages, opts) {
     try { return await otherReply(pick, messages, opts); }
     catch (err) {
       console.warn(`${pick} could not answer, using a backup:`, err.message);
-      const other = pick === 'claude' ? 'chatgpt' : 'claude';
+      const other = ['claude', 'chatgpt', 'local'].find((b) => b !== pick && have[b]) || 'claude';
       if (have.gemini) { try { return { value: await createGeminiReply(messages, opts), via: 'Gemini' }; } catch (e) { if (!have[other]) throw e; } }
       if (have[other]) return otherReply(other, messages, opts);
       throw err;
@@ -369,7 +369,7 @@ const PREF_RULES = {
   sleepMinutes: (v) => Number.isInteger(v) && v >= 1 && v <= 60, voiceName: (v) => VOICES.includes(v), fullscreen: (v) => typeof v === 'boolean', avatarStyle: (v) => ['reactor', 'head'].includes(v), appsInside: (v) => typeof v === 'boolean', launchAppsOnStart: (v) => typeof v === 'boolean', dictation: (v) => typeof v === 'boolean', autoDock: (v) => typeof v === 'boolean', hideTaskbar: (v) => typeof v === 'boolean',
   userName: (v) => typeof v === 'string' && v.length <= 40, homeCity: (v) => typeof v === 'string' && v.length <= 80, newsTopics: (v) => typeof v === 'string' && v.length <= 160,
   briefingOnStart: (v) => typeof v === 'boolean', lastBriefingAt: (v) => Number.isFinite(v) && v >= 0,
-  brain: (v) => ['gemini', 'claude', 'chatgpt', 'big'].includes(v), dnd: (v) => typeof v === 'boolean', lockOnStart: (v) => typeof v === 'boolean', lockIdleMinutes: (v) => Number.isInteger(v) && v >= 0 && v <= 240, backupDaily: (v) => typeof v === 'boolean', liveVoice: (v) => typeof v === 'boolean', liveEngine: (v) => ['gemini', 'chatgpt'].includes(v), chatBrain: (v) => ['gemini', 'claude', 'chatgpt'].includes(v), screenEngine: (v) => ['claude', 'chatgpt', 'gemini'].includes(v), speakVoice: (v) => ['gemini', 'openai'].includes(v), lastBackupAt: (v) => Number.isFinite(v) && v >= 0
+  brain: (v) => ['gemini', 'claude', 'chatgpt', 'big'].includes(v), dnd: (v) => typeof v === 'boolean', lockOnStart: (v) => typeof v === 'boolean', lockIdleMinutes: (v) => Number.isInteger(v) && v >= 0 && v <= 240, backupDaily: (v) => typeof v === 'boolean', liveVoice: (v) => typeof v === 'boolean', liveEngine: (v) => ['gemini', 'chatgpt'].includes(v), chatBrain: (v) => ['gemini', 'claude', 'chatgpt', 'local'].includes(v), screenEngine: (v) => ['claude', 'chatgpt', 'gemini'].includes(v), speakVoice: (v) => ['gemini', 'openai'].includes(v), lastBackupAt: (v) => Number.isFinite(v) && v >= 0
 };
 function readPreferences() {
   let p = {}; try { p = JSON.parse(fs.readFileSync(preferencesFile(), 'utf8')) || {}; } catch {}
@@ -755,7 +755,7 @@ function createServer() {
       });
       return;
     }
-    if (req.method === 'GET' && url.pathname === '/api/brains') { send(res, 200, { available: brains.available(), current: readPreferences().brain, claudeModel: brains.CLAUDE_MODEL(), openaiModel: brains.OPENAI_MODEL() }); return; }
+    if (req.method === 'GET' && url.pathname === '/api/brains') { send(res, 200, { available: brains.available(), local: brains.localInfo(), current: readPreferences().brain, claudeModel: brains.CLAUDE_MODEL(), openaiModel: brains.OPENAI_MODEL() }); return; }
     if (req.method === 'GET' && url.pathname === '/api/preferences') { send(res, 200, readPreferences()); return; }
     if (req.method === 'POST' && url.pathname === '/api/preferences') {
       try { send(res, 200, writePreferences(await readJson(req, 4096))); }
@@ -819,7 +819,7 @@ function createServer() {
         // Controller
         if (p === '/api/controller') {
           const [vol, bright, sys] = await Promise.all([osx.volume({}).catch(() => null), osx.brightness().catch(() => null), osx.stats().catch(() => null)]);
-          return ok({ volume: vol, brightness: bright?.level ?? null, battery: sys?.battery || null, network: sys?.network || null, dnd: readPreferences().dnd, brain: readPreferences().brain, brains: brains.available() });
+          return ok({ volume: vol, brightness: bright?.level ?? null, battery: sys?.battery || null, network: sys?.network || null, dnd: readPreferences().dnd, brain: readPreferences().brain, brains: brains.available(), local: brains.localInfo() });
         }
         if (p === '/api/controller/volume') return ok(await osx.volume(typeof body.mute === 'boolean' ? { mute: body.mute } : { level: Number(body.level) }));
         if (p === '/api/controller/brightness') return ok(await osx.brightness(Number(body.level)));
